@@ -384,15 +384,49 @@ def build_where_clause(filters: Dict[str, Any]) -> Tuple[str, List[Any]]:
 ALLOWED_SORT_COLS = {
     "announce_date": "announce_date",
     "amount_wan": "amount_wan",
-    "yield_max": "COALESCE(yield_max, yield_min, -1)",
-    "yield_min": "COALESCE(yield_min, yield_max, -1)",
+    "yield_max": "COALESCE(yield_max, yield_min)",
+    "yield_min": "COALESCE(yield_min, yield_max)",
+    "actual_income_wan": "actual_income_wan",
     "start_date": "start_date",
-    "end_date_iso": "COALESCE(NULLIF(end_date_iso,''), '9999-12-31')",
+    "end_date_iso": "end_date_iso",
     "company_name": "company_name",
-    "province": "province, city",
+    "province": "province",
+    "record_type": "record_type",
+    "maturity_status": "maturity_status",
     "institution_main": "institution_main",
+    "branch_name": "branch_name",
+    "product_type": "product_type",
+    "fund_source": "fund_source",
     "id": "id",
 }
+
+
+def _build_order_sql(sort_by: str, sort_dir: str) -> str:
+    col = sort_by if sort_by in ALLOWED_SORT_COLS else "announce_date"
+    d = "ASC" if str(sort_dir).lower() == "asc" else "DESC"
+    if col == "id":
+        return f"ORDER BY id {d}"
+    if col == "actual_income_wan":
+        return f"ORDER BY (CASE WHEN actual_income_wan IS NULL THEN 1 ELSE 0 END) ASC, actual_income_wan {d}, id DESC"
+    if col == "amount_wan":
+        return f"ORDER BY (CASE WHEN amount_wan IS NULL THEN 1 ELSE 0 END) ASC, amount_wan {d}, id DESC"
+    if col == "yield_max":
+        expr = "COALESCE(yield_max, yield_min)"
+        return f"ORDER BY (CASE WHEN {expr} IS NULL THEN 1 ELSE 0 END) ASC, {expr} {d}, id DESC"
+    if col == "yield_min":
+        expr = "COALESCE(yield_min, yield_max)"
+        return f"ORDER BY (CASE WHEN {expr} IS NULL THEN 1 ELSE 0 END) ASC, {expr} {d}, id DESC"
+    if col == "province":
+        return f"ORDER BY (CASE WHEN province IS NULL OR province = '' OR province = '未知' THEN 1 ELSE 0 END) ASC, province {d}, city {d}, id DESC"
+    if col == "branch_name":
+        return f"ORDER BY (CASE WHEN branch_name IS NULL OR branch_name = '' OR branch_name = '未披露' THEN 1 ELSE 0 END) ASC, branch_name {d}, id DESC"
+    if col == "institution_main":
+        return f"ORDER BY (CASE WHEN institution_main IS NULL OR institution_main = '' OR institution_main = '未披露' THEN 1 ELSE 0 END) ASC, institution_main {d}, id DESC"
+    if col == "product_type":
+        return f"ORDER BY (CASE WHEN product_type IS NULL OR product_type = '' THEN 1 ELSE 0 END) ASC, product_type {d}, product_name {d}, id DESC"
+    if col == "fund_source":
+        return f"ORDER BY (CASE WHEN fund_source IS NULL OR fund_source = '' OR fund_source = '未注明' THEN 1 ELSE 0 END) ASC, fund_source {d}, id DESC"
+    return f"ORDER BY (CASE WHEN {col} IS NULL OR {col} = '' THEN 1 ELSE 0 END) ASC, {col} {d}, id DESC"
 
 
 def query_records(
@@ -404,9 +438,7 @@ def query_records(
     db_path: Path = DB_PATH,
 ) -> Dict[str, Any]:
     where_sql, params = build_where_clause(filters)
-    sort_expr = ALLOWED_SORT_COLS.get(sort_by, "announce_date")
-    direction = "ASC" if str(sort_dir).lower() == "asc" else "DESC"
-    order_sql = f"ORDER BY {sort_expr} {direction}, id DESC"
+    order_sql = _build_order_sql(sort_by, sort_dir)
 
     with get_conn(db_path) as conn:
         summary_row = conn.execute(

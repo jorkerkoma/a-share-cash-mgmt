@@ -413,7 +413,7 @@
     .pager { justify-content: center; }
   }
 </style>
-<script>window.__STATIC_MODE__ = true; window.__DATA_VER__ = "202611261719";</script>
+<script>window.__STATIC_MODE__ = true; window.__DATA_VER__ = "202611261727";</script>
 </head>
 <body>
 
@@ -668,7 +668,10 @@
         <option value="announce_date:desc">公告日期（最新优先）</option>
         <option value="amount_wan:desc">金额（从高到低）</option>
         <option value="yield_max:desc">收益率（从高到低）</option>
+        <option value="actual_income_wan:desc">实际收益（从高到低）</option>
+        <option value="actual_income_wan:asc">实际收益（从低到高）</option>
         <option value="end_date_iso:asc">到期日期（最近优先）</option>
+        <option value="start_date:desc">开始日期（最新优先）</option>
         <option value="province:asc">按省市区域排序</option>
       </select>
     </div>
@@ -678,20 +681,20 @@
       <table>
         <thead>
           <tr>
-            <th class="sortable" onclick="toggleSort('company_name')">上市公司主体 <span id="sort_company_name"></span></th>
-            <th class="ctr sortable" onclick="toggleSort('province')">区域 <span id="sort_province"></span></th>
-            <th class="ctr">交易类型</th>
-            <th class="ctr">当前状态</th>
-            <th class="sortable" onclick="toggleSort('institution_main')">受托机构（银行/券商） <span id="sort_institution_main"></span></th>
-            <th>分支行 / 营业部</th>
-            <th>产品名称 & 类型</th>
-            <th class="num sortable" onclick="toggleSort('amount_wan')">金额（万元） <span id="sort_amount_wan"></span></th>
-            <th class="ctr sortable" onclick="toggleSort('yield_max')">收益率区间 <span id="sort_yield_max"></span></th>
-            <th class="ctr sortable" onclick="toggleSort('start_date')">开始日期 <span id="sort_start_date"></span></th>
-            <th class="ctr sortable" onclick="toggleSort('end_date_iso')">到期日期 <span id="sort_end_date_iso"></span></th>
-            <th class="num">实际收益(万)</th>
-            <th class="ctr">资金来源</th>
-            <th class="ctr sortable" onclick="toggleSort('announce_date')">公告日 / 原文 <span id="sort_announce_date">▼</span></th>
+            <th class="sortable" title="点击排序" onclick="toggleSort('company_name')">上市公司主体 <span id="sort_company_name"></span></th>
+            <th class="ctr sortable" title="点击排序" onclick="toggleSort('province')">区域 <span id="sort_province"></span></th>
+            <th class="ctr sortable" title="点击排序" onclick="toggleSort('record_type')">交易类型 <span id="sort_record_type"></span></th>
+            <th class="ctr sortable" title="点击排序" onclick="toggleSort('maturity_status')">当前状态 <span id="sort_maturity_status"></span></th>
+            <th class="sortable" title="点击排序" onclick="toggleSort('institution_main')">受托机构（银行/券商） <span id="sort_institution_main"></span></th>
+            <th class="sortable" title="点击排序" onclick="toggleSort('branch_name')">分支行 / 营业部 <span id="sort_branch_name"></span></th>
+            <th class="sortable" title="点击排序" onclick="toggleSort('product_type')">产品名称 & 类型 <span id="sort_product_type"></span></th>
+            <th class="num sortable" title="点击排序" onclick="toggleSort('amount_wan')">金额（万元） <span id="sort_amount_wan"></span></th>
+            <th class="ctr sortable" title="点击排序" onclick="toggleSort('yield_max')">收益率区间 <span id="sort_yield_max"></span></th>
+            <th class="ctr sortable" title="点击排序" onclick="toggleSort('start_date')">开始日期 <span id="sort_start_date"></span></th>
+            <th class="ctr sortable" title="点击排序" onclick="toggleSort('end_date_iso')">到期日期 <span id="sort_end_date_iso"></span></th>
+            <th class="num sortable" title="点击排序" onclick="toggleSort('actual_income_wan')">实际收益(万) <span id="sort_actual_income_wan"></span></th>
+            <th class="ctr sortable" title="点击排序" onclick="toggleSort('fund_source')">资金来源 <span id="sort_fund_source"></span></th>
+            <th class="ctr sortable" title="点击排序" onclick="toggleSort('announce_date')">公告日 / 原文 <span id="sort_announce_date">▼</span></th>
           </tr>
         </thead>
         <tbody id="recordsTbody">
@@ -1062,16 +1065,32 @@ function staticMatchList(records, f) {
 
 function staticSort(list, col, dir) {
   const mul = dir === 'asc' ? 1 : -1;
+  const getVal = (r) => {
+    if (col === 'actual_income_wan') return r.actual_income_wan !== null && r.actual_income_wan !== undefined ? Number(r.actual_income_wan) : null;
+    if (col === 'amount_wan') return r.amount_wan !== null && r.amount_wan !== undefined ? Number(r.amount_wan) : null;
+    if (col === 'yield_max') {
+      const y = r.yield_max !== null && r.yield_max !== undefined ? r.yield_max : r.yield_min;
+      return y !== null && y !== undefined ? Number(y) : null;
+    }
+    if (col === 'start_date') return r.start_date || null;
+    if (col === 'end_date_iso') return r.end_date_iso || null;
+    if (col === 'province') return (r.province && r.province !== '未知') ? (r.province + '|' + (r.city || '')) : null;
+    if (col === 'branch_name') return (r.branch_name && r.branch_name !== '未披露') ? r.branch_name : null;
+    if (col === 'institution_main') return (r.institution_main && r.institution_main !== '未披露') ? r.institution_main : null;
+    if (col === 'product_type') return r.product_type ? (r.product_type + '|' + (r.product_name || '')) : null;
+    if (col === 'fund_source') return (r.fund_source && r.fund_source !== '未注明') ? r.fund_source : null;
+    return r[col] || null;
+  };
   return list.slice().sort((a, b) => {
-    let va, vb;
-    if (col === 'amount_wan') { va = a.amount_wan ?? -1; vb = b.amount_wan ?? -1; }
-    else if (col === 'yield_max') { va = a.yield_max ?? a.yield_min ?? -1; vb = b.yield_max ?? b.yield_min ?? -1; }
-    else if (col === 'end_date_iso') { va = a.end_date_iso || '9999-12-31'; vb = b.end_date_iso || '9999-12-31'; }
-    else if (col === 'province') { va = (a.province || 'zzz') + '|' + (a.city || 'zzz'); vb = (b.province || 'zzz') + '|' + (b.city || 'zzz'); }
-    else { va = a[col] || ''; vb = b[col] || ''; }
+    const va = getVal(a), vb = getVal(b);
+    const ea = (va === null || va === undefined || va === '');
+    const eb = (vb === null || vb === undefined || vb === '');
+    if (ea && eb) return a.id - b.id;
+    if (ea) return 1;
+    if (eb) return -1;
     if (va < vb) return -1 * mul;
     if (va > vb) return 1 * mul;
-    return (a.id - b.id);
+    return a.id - b.id;
   });
 }
 
@@ -1398,10 +1417,21 @@ function syncDesktopSearch(val) {
   document.getElementById('f_q_mobile').value = val;
   syncClearBtns();
 }
+function syncSortIndicators() {
+  document.querySelectorAll('[id^="sort_"]').forEach(el => el.textContent = '');
+  const el = document.getElementById('sort_' + state.sort_by);
+  if (el) el.textContent = state.sort_dir === 'desc' ? '▼' : '▲';
+  const mobSel = document.getElementById('mobSortSel');
+  if (mobSel) {
+    const val = `${state.sort_by}:${state.sort_dir}`;
+    if (Array.from(mobSel.options).some(o => o.value === val)) mobSel.value = val;
+  }
+}
 function onMobileSortChange() {
   const [col, dir] = document.getElementById('mobSortSel').value.split(':');
   state.sort_by = col;
   state.sort_dir = dir;
+  syncSortIndicators();
   searchRecords(1);
 }
 
@@ -1595,7 +1625,9 @@ async function searchRecords(page = 1) {
       const branchDisp = (it.branch_name && it.branch_name !== '未披露')
         ? `<span style="color:#0f172a;font-weight:500;">${esc(it.branch_name)}</span>`
         : `<span style="color:#94a3b8;">未披露</span>`;
-      const incDisp = it.actual_income_wan !== null ? fmtNum(it.actual_income_wan, 2) : '<span style="color:#cbd5e1;">-</span>';
+      const incDisp = it.actual_income_wan !== null
+        ? `${fmtNum(it.actual_income_wan, 2)}${it.currency && it.currency !== '人民币' ? `<span class="sub-meta">${esc(it.currency)}</span>` : ''}`
+        : '<span style="color:#cbd5e1;">-</span>';
       const yrText = it.yield_rate_raw || '-';
       const yieldCellHtml = yrText.length > 16
         ? `<td class="yield-cell" title="${esc(yrText)}"><span class="yield-long">${esc(yrText)}</span></td>`
@@ -1642,7 +1674,7 @@ async function searchRecords(page = 1) {
       const brText = (it.branch_name && it.branch_name !== '未披露') ? it.branch_name : '未披露';
       const dateSpan = `${it.start_date || '-'} → ${it.end_date || '-'}`;
       const incHtml = it.actual_income_wan !== null
-        ? `<div class="m-kv-full"><span class="m-k">实际获得收益</span><span class="m-v" style="color:#059669;">${fmtNum(it.actual_income_wan, 2)} 万元</span></div>`
+        ? `<div class="m-kv-full"><span class="m-k">实际获得收益</span><span class="m-v" style="color:#059669;">${fmtNum(it.actual_income_wan, 2)} 万${it.currency && it.currency !== '人民币' ? esc(it.currency) : '元'}</span></div>`
         : '';
       return `<div class="m-card">
         <div class="m-card-head">
@@ -1697,11 +1729,10 @@ function goPage(delta) {
 }
 
 function toggleSort(col) {
+  const descFirst = new Set(['amount_wan', 'yield_max', 'actual_income_wan', 'start_date', 'announce_date']);
   if (state.sort_by === col) state.sort_dir = state.sort_dir === 'desc' ? 'asc' : 'desc';
-  else { state.sort_by = col; state.sort_dir = (col === 'end_date_iso' || col === 'province') ? 'asc' : 'desc'; }
-  document.querySelectorAll('[id^="sort_"]').forEach(el => el.textContent = '');
-  const el = document.getElementById('sort_' + col);
-  if (el) el.textContent = state.sort_dir === 'desc' ? '▼' : '▲';
+  else { state.sort_by = col; state.sort_dir = descFirst.has(col) ? 'desc' : 'asc'; }
+  syncSortIndicators();
   searchRecords(1);
 }
 
@@ -1727,6 +1758,7 @@ function setQuickPreset(key) {
   else if (key === 'exp30') {
     document.getElementById('f_status').value = '即将30天到期';
     state.sort_by = 'end_date_iso'; state.sort_dir = 'asc';
+    syncSortIndicators();
   } else if (key === 'buy') document.getElementById('f_rec_type').value = '本次新购';
   else if (key === 'redeem') document.getElementById('f_rec_type').value = '到期赎回';
   else if (key === 'flex') document.getElementById('f_status').value = '随时可转让/赎回';
@@ -1739,7 +1771,7 @@ function applyQuickStatus(st) {
   resetFilters(false);
   if (st) {
     document.getElementById('f_status').value = st;
-    if (st === '即将30天到期') { state.sort_by = 'end_date_iso'; state.sort_dir = 'asc'; }
+    if (st === '即将30天到期') { state.sort_by = 'end_date_iso'; state.sort_dir = 'asc'; syncSortIndicators(); }
   }
   searchRecords(1);
 }
