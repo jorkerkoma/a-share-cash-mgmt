@@ -173,10 +173,37 @@ def normalize_institution(raw: str, body_text: str = "") -> Tuple[str, str, str]
             # 有时候银行名后紧跟“（中国）有限公司XX分行”
             rest = re.sub(r"^(?:股份有限公司|有限责任公司|有限公司|（中国）|\(中国\))+", "", rest)
             main = main_part
-            if rest and any(k in rest for k in ("分行", "支行", "营业部", "营业室", "分理处", "网点", "中心")):
-                branch = rest
-            elif rest and len(rest) >= 2 and not any(k in rest for k in ("股份", "有限", "公司")):
-                branch = rest
+            if rest:
+                # 仅提取真实分支行/营业部片段，严防银行名后紧跟产品名称（如“苏州分行单位人民币定制型结构性存款”或“企业金融人民币结构性存款产品”）混入分行字段
+                m_br = re.match(
+                    r"^([\u4e00-\u9fa5A-Za-z0-9·()（）]{1,28}?(?:分行营业部|支行营业部|分行|支行|营业部|营业室|营业厅|分理处|储蓄所|网点|中心))",
+                    rest,
+                )
+                if m_br:
+                    cand_br = m_br.group(1).strip(" -—、，,（）()")
+                    if not any(
+                        bad in cand_br
+                        for bad in ("存款", "理财", "存单", "产品", "收益", "结构", "系列", "财富", "计划", "基金", "信托")
+                    ):
+                        branch = cand_br
+                elif (
+                    len(rest) >= 2
+                    and len(rest) <= 14
+                    and not any(
+                        bad in rest
+                        for bad in (
+                            "股份", "有限", "公司", "存款", "理财", "存单", "产品", "结构", "收益",
+                            "系列", "挂钩", "财富", "添利", "智信", "金芙蓉", "保本", "浮动", "通知",
+                            "协定", "定期", "对公", "企业金融", "单位", "人民币", "看涨", "看跌",
+                            "区间", "凭证", "计划", "基金", "信托", "代码", "编号", "类型", "金额",
+                            "期限", "利率", "：", ":", "“", "”",
+                        )
+                    )
+                    and not re.search(r"\d{2,}|[（(][一二三四五六七八九十\d]+[）)]", rest)
+                ):
+                    branch = rest
+                    if branch.endswith(("支", "分")) and len(branch) >= 3:
+                        branch = branch + "行"
         else:
             # 可能是简称开头，例如 “工行苏州分行” / “农行XX支行”
             for alias, full_name in sorted(BANK_ALIAS_MAP.items(), key=lambda x: -len(x[0])):
@@ -262,7 +289,17 @@ def _find_branch_in_body(main: str, inst_type: str, body_text: str) -> str:
         pat = rf"{escaped}(?:股份有限公司|有限责任公司|有限公司)?([\u4e00-\u9fa5A-Za-z0-9]{{2,18}}(?:证券营业部|营业部|分公司))"
     matches = set(re.findall(pat, clean_body))
     # 过滤掉像“账户开立在XX支行”但出现多个不同支行时的歧义（只保留唯一或最多提取第一个清晰分支行？为严谨，仅当唯一时自动补全！）
-    filtered = [m for m in matches if not any(bad in m for bad in ("募集资金", "专用", "专户", "监管", "协议", "公司", "签署", "购买", "开展", "办理"))]
+    filtered = [
+        m for m in matches
+        if not any(
+            bad in m
+            for bad in (
+                "募集资金", "专用", "专户", "监管", "协议", "公司", "签署", "购买", "开展", "办理",
+                "银行", "存款", "理财", "产品", "存单", "结构", "收益", "通知", "定期", "协定",
+                "证券", "信托", "基金", "公告", "闲置", "资金", "理财产品",
+            )
+        )
+    ]
     if len(filtered) == 1:
         return filtered[0]
     return ""

@@ -404,50 +404,94 @@ def _concat_rows(row_a: List[str], row_b: List[str]) -> List[str]:
     return out
 
 
+def _align_rows_to_prev_header(prev_header: List[str], tb_rows: List[List[str]]) -> Optional[List[List[str]]]:
+    """
+    若跨页续表因 PDF 空列导致列数略有差异（如 9 列 vs 11 列含 2 个空白列），
+    但表头非空列与上一页表头完全一致，则按非空列索引映射对齐为上一页同等列数。
+    """
+    if not prev_header or not tb_rows:
+        return None
+    prev_ne = [(i, clean_text(c)) for i, c in enumerate(prev_header) if clean_text(c)]
+    cur_ne = [(i, clean_text(c)) for i, c in enumerate(tb_rows[0]) if clean_text(c)]
+    if not prev_ne or [x[1] for x in prev_ne] != [x[1] for x in cur_ne]:
+        return None
+    col_map_idx = [cur_idx for cur_idx, _ in cur_ne]
+    prev_positions = [prev_idx for prev_idx, _ in prev_ne]
+    target_len = len(prev_header)
+    aligned: List[List[str]] = []
+    for row in tb_rows:
+        new_r = [""] * target_len
+        for src_i, dst_i in zip(col_map_idx, prev_positions):
+            if src_i < len(row):
+                new_r[dst_i] = row[src_i]
+        aligned.append(new_r)
+    return aligned
+
+
 def _merge_cross_page_tables(tables: List[ExtractedTable]) -> List[ExtractedTable]:
     """
-    合并跨页拆分的同一张表格，同时自动缝合被分页腰斩的表头行和数据行！
+    合并跨页拆分的同一张表格（支持跨 2 页、3 页及更多连续页面），
+    同时自动缝合被分页腰斩的表头行和数据行（含下一页重复表头后紧跟残缺续行的情形）！
     """
     if not tables:
         return []
     merged: List[ExtractedTable] = [tables[0]]
     for tb in tables[1:]:
         prev = merged[-1]
-        same_cols = len(tb.rows[0]) == len(prev.rows[0])
+        tb_rows = tb.rows
+        same_cols = len(tb_rows[0]) == len(prev.rows[0])
         adjacent_page = tb.page_idx == prev.page_idx + 1
         near_top = tb.y0 < 200
         no_new_section = (not tb.section_heading) or (tb.section_heading == prev.section_heading)
 
+        # 若因幽灵空白列导致列数不同但跨页表头一致，自动对齐列索引
+        if not same_cols and adjacent_page and near_top and no_new_section:
+            aligned = _align_rows_to_prev_header(prev.rows[0], tb_rows)
+            if aligned:
+                tb_rows = aligned
+                same_cols = True
+
         # 特殊：2列 KV 竖表跨页续表（无新“事项X”标题）
-        if len(tb.rows[0]) == 2 and same_cols and adjacent_page and near_top and no_new_section:
-            prev.rows.extend(tb.rows)
+        if len(tb_rows[0]) == 2 and same_cols and adjacent_page and near_top and no_new_section:
+            prev.rows.extend(tb_rows)
+            prev.page_idx = tb.page_idx
             prev.y1 = tb.y1
             continue
 
         if same_cols and adjacent_page and near_top and no_new_section:
-            first_row = tb.rows[0]
+            first_row = tb_rows[0]
+            col_map = _map_header_columns(prev.rows[0])
+
             # 情况1：上一页只来得及放了1行表头，下一页第0行是表头下半截
             if len(prev.rows) == 1 and _looks_like_split_header_tail(first_row):
                 prev.rows[0] = _concat_rows(prev.rows[0], first_row)
-                prev.rows.extend(tb.rows[1:])
+                prev.rows.extend(tb_rows[1:])
+                prev.page_idx = tb.page_idx
                 prev.y1 = tb.y1
                 continue
 
-            # 情况2：下一页重复了完整表头
+            # 情况2：下一页重复了完整表头（注意：表头后的第一行 data_rows[0] 仍可能是上一页末行被腰斩的下半截！）
             if [clean_text(c) for c in first_row] == [clean_text(c) for c in prev.rows[0]] or _is_header_like_row(first_row):
-                prev.rows.extend(tb.rows[1:])
+                data_rows = tb_rows[1:]
+                if data_rows and len(prev.rows) >= 2 and _looks_like_split_data_tail(prev.rows[-1], data_rows[0], col_map):
+                    prev.rows[-1] = _concat_rows(prev.rows[-1], data_rows[0])
+                    prev.rows.extend(data_rows[1:])
+                else:
+                    prev.rows.extend(data_rows)
+                prev.page_idx = tb.page_idx
                 prev.y1 = tb.y1
                 continue
 
             # 情况3：下一页第0行是上一页最后一行数据被分页劈开的下半截
-            col_map = _map_header_columns(prev.rows[0])
             if len(prev.rows) >= 2 and _looks_like_split_data_tail(prev.rows[-1], first_row, col_map):
                 prev.rows[-1] = _concat_rows(prev.rows[-1], first_row)
-                prev.rows.extend(tb.rows[1:])
+                prev.rows.extend(tb_rows[1:])
+                prev.page_idx = tb.page_idx
                 prev.y1 = tb.y1
                 continue
 
-            prev.rows.extend(tb.rows)
+            prev.rows.extend(tb_rows)
+            prev.page_idx = tb.page_idx
             prev.y1 = tb.y1
             continue
 
@@ -727,6 +771,8 @@ def _rows_to_records(
         elif entrusting:
             last_entrusting = entrusting
 
+        if inst_raw in ("行", "支行", "分行", "有限公司", "股份有限公司"):
+            inst_raw = ""
         if not inst_raw and last_institution and (prod_name or amt_raw):
             inst_raw = last_institution
         elif inst_raw:
@@ -800,10 +846,12 @@ def _rows_to_records(
         actual_income_wan = parse_income_wan(income_raw, income_hdr, amount_wan, unit_hint) if income_raw else None
 
         inst_type, inst_main, branch_name = normalize_institution(inst_raw, full_text)
-        # 仅当受托方列缺失且产品名中明确含真实银行/券商/理财子名时才从产品名兜底，绝不把“定期存款/结构性存款”当作机构名
+        # 仅当受托方列缺失且产品名中明确含真实银行/券商/理财子名时才从产品名兜底，绝不把产品后缀当作分支行
         if not inst_main and prod_name:
             cand_type, cand_main, cand_branch = normalize_institution(prod_name, full_text)
             if cand_type != "其他" and cand_main:
+                if cand_branch and not re.search(r"(?:分行营业部|支行营业部|分行|支行|营业部|营业室|分理处)$", cand_branch):
+                    cand_branch = "未披露"
                 inst_type, inst_main, branch_name = cand_type, cand_main, cand_branch
             else:
                 inst_type, inst_main, branch_name = "其他", "未披露", "未披露"
@@ -864,21 +912,23 @@ def _extract_from_prose(ann: Dict[str, Any], company_name: str, full_text: str) 
     兜底解析：针对没有画表格、仅用文字段落披露单笔购买/赎回的公告（如 600713 南京医药 等）
     """
     clean_body = re.sub(r"\s+", "", full_text)
+    # 保留换行边界的文本，防止正文键值对“（二）签约银行：... \n（三）产品类型：...”跨行粘连
+    line_body = "\n".join(re.sub(r"\s+", "", ln) for ln in (full_text or "").splitlines() if ln.strip())
     records: List[Dict[str, Any]] = []
 
     # 1. 键值对正文（含“1、产品名称：...”）
-    kv_inst = re.search(r"(?:受托方|受托人|签约方名称|发行机构|签约银行|开户银行|合作银行)[：:]([^\n。；;，,]{2,40})", clean_body)
-    kv_prod = re.search(r"(?:产品名称|理财产品名称|投资产品)[：:]([^\n。；;，,]{2,50})", clean_body)
-    kv_amt = re.search(r"(?:认购金额|购买金额|投资金额|委托金额|产品金额|本金|赎回金额)[：:](?:人民币)?([\d,.]+\s*[万亿]?元?)", clean_body)
-    kv_rate = re.search(r"(?:预期年化收益率|预计年化收益率|预计年收益率|年化收益率|年收益率|预期收益率)[：:]([^\n。；;，,]{1,35})", clean_body)
-    kv_start = re.search(r"(?:起息日|起始日|认购日|购买日|成立日|投资起始日)[：:](20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?)", clean_body)
-    kv_end = re.search(r"(?:到期日|终止日|赎回日|投资到期日)[：:](20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?|随时[^\n。；;，,]{1,10}|无固定期限)", clean_body)
-    kv_term = re.search(r"(?:产品期限|存款期限|投资期限)[：:]([^\n。；;，,]{1,20})", clean_body)
-    kv_income = re.search(r"(?:实际收益|获得收益|投资收益|理财收益|利息收入)[：:](?:人民币)?([\d,.]+\s*[万亿]?元?)", clean_body)
+    kv_inst = re.search(r"(?:受托方|受托人|签约方名称|发行机构|签约银行|开户银行|合作银行)[：:]([^\n。；;，,]{2,40})", line_body)
+    kv_prod = re.search(r"(?:产品名称|理财产品名称|投资产品)[：:]([^\n。；;，,]{2,50})", line_body)
+    kv_amt = re.search(r"(?:认购金额|购买金额|投资金额|委托金额|产品金额|本金|赎回金额)[：:](?:人民币)?([\d,.]+\s*[万亿]?元?)", line_body)
+    kv_rate = re.search(r"(?:预期年化收益率|预计年化收益率|预计年收益率|年化收益率|年收益率|预期收益率)[：:]([^\n。；;，,]{1,35})", line_body)
+    kv_start = re.search(r"(?:起息日|起始日|认购日|购买日|成立日|投资起始日)[：:](20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?)", line_body)
+    kv_end = re.search(r"(?:到期日|终止日|赎回日|投资到期日)[：:](20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?|随时[^\n。；;，,]{1,10}|无固定期限)", line_body)
+    kv_term = re.search(r"(?:产品期限|存款期限|投资期限)[：:]([^\n。；;，,]{1,20})", line_body)
+    kv_income = re.search(r"(?:实际收益|获得收益|投资收益|理财收益|利息收入)[：:](?:人民币)?([\d,.]+\s*[万亿]?元?)", line_body)
 
     if kv_inst and kv_amt:
-        inst_raw = kv_inst.group(1)
-        prod_name = kv_prod.group(1) if kv_prod else ""
+        inst_raw = re.split(r"[（(][一二三四五六七八九十\d]+[）)]", kv_inst.group(1))[0].strip()
+        prod_name = re.split(r"[（(][一二三四五六七八九十\d]+[）)]", kv_prod.group(1))[0].strip() if kv_prod else ""
         amt_raw = kv_amt.group(1)
         amount_wan, currency = parse_amount_wan(amt_raw)
         if amount_wan is not None:

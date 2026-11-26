@@ -109,6 +109,7 @@ def build_static_site(db_path: Path = DB_PATH) -> dict:
     # 3. 同步生成全量5页样式化 Excel 供云端直接下载
     xlsx_path = DIST_DATA_DIR / "A股现金管理汇总.xlsx"
     export_excel_to_file(output_path=xlsx_path, db_path=db_path)
+    shutil.copyfile(xlsx_path, DIST_DATA_DIR / "all.xlsx")
 
     # 4. 生成静态版 dist/index.html（注入静态模式标记 + 防缓存版本号）
     html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
