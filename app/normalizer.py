@@ -454,27 +454,73 @@ def parse_income_wan(
 
 def parse_yield_rate(raw: str) -> Tuple[str, Optional[float], Optional[float]]:
     """
-    解析预期年化收益率/收益率区间，返回 (cleaned_raw, yield_min, yield_max)
+    解析预期年化收益率/收益率区间，返回 (display_str, yield_min, yield_max)。
+    自动把冗长的“保底+浮动”“固定+n/N”“高/中/低档”条款规整为简洁准确的收益率区间（如 '0.7%-1.75%'），
+    并把基准指数/加点公式保留为文本且不误解析权重或点差数值。
     """
     if not raw:
         return ("", None, None)
-    text = clean_keep_spaces(raw)
+    text = clean_keep_spaces(raw).replace("％", "%")
     if text in ("-", "--", "/", "无", "不适用", "N/A"):
         return ("", None, None)
 
-    # 复杂基准公式（如“活期基准利率*80%+中债指数*20%”）或 BP 加点（如“协定存款利率+25BP”）：保留原文，不把权重/BP误当成收益率数值
-    if re.search(r"[*×]\s*\d+(?:\.\d+)?%|指数收益率|基准利率\s*[*×]|(?:\+|加)\s*\d+\s*(?:BP|bps|个基点)", text, re.I):
+    def _fmt_range(lo: float, hi: float) -> str:
+        lo_r, hi_r = round(lo, 4), round(hi, 4)
+        if abs(lo_r - hi_r) < 1e-6:
+            return f"{lo_r:g}%"
+        return f"{lo_r:g}%-{hi_r:g}%"
+
+    # 1. 区间累计叠加公式 “年化收益率=0.95%+0.72%*n/N” -> [0.95%, 1.67%]（放在基准权重规则之前！）
+    m_accrual = re.search(
+        r"(\d+(?:\.\d+)?)\s*%\s*\+\s*(\d+(?:\.\d+)?)\s*%\s*[*×xX]\s*[nN]\s*/\s*[nN]",
+        text,
+    )
+    if m_accrual:
+        base_v = float(m_accrual.group(1))
+        add_v = float(m_accrual.group(2))
+        if 0.0 < base_v <= 12.0 and 0.0 < base_v + add_v <= 12.0:
+            ymin = round(base_v, 4)
+            ymax = round(base_v + add_v, 4)
+            return (_fmt_range(ymin, ymax), ymin, ymax)
+
+    # 2. 复杂基准指数权重 / 利率加减点公式（如“活期基准利率*80%+中债指数*20%”“定存利率+0.05%”“协定存款利率+25BP”）
+    if re.search(
+        r"(?:[*×xX]\s*\d+(?:\.\d+)?%|\d+(?:\.\d+)?%\s*[*×xX]|指数(?:收益率|（|\(|代码)|基准利率\s*[*×xX]|"
+        r"(?:利率|指数)[^%]{0,18}(?:\+|加|减|上浮|下浮)\s*\d+(?:\.\d+)?(?:\s*(?:BP|bps|个基点)|%))",
+        text,
+        re.I,
+    ):
         return (text, None, None)
 
-    # 先剥离文本中混入的完整日期（如 '2026/8/25赎回'），防止把月/日误解析为收益率
-    sanitized = re.sub(r"20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?", "", text)
-    # 剥离期限数字（如 '30天'、'7天'、'1年'）
-    sanitized = re.sub(r"\d+(?:天|个月|年|期|号)", "", sanitized)
+    # 3. 浦发利多多等“保底收益率 X%，浮动收益率为 0% 或 Y% 或 Z%”叠加结构 -> 总收益区间 [X, X + max(float)]
+    m_base_float = re.search(
+        r"(?:保底|固定|最低)(?:年化)?收益率(?:（年化）|\(年化\))?[：:为]?\s*(\d+(?:\.\d+)?)\s*%.*?浮动(?:年化)?收益率(?:（年化）|\(年化\))?[：:为]?\s*([^。；\n]{1,90})",
+        text,
+    )
+    if m_base_float:
+        base_v = float(m_base_float.group(1))
+        tail = m_base_float.group(2)
+        # 若浮动收益是复杂期权公式（含 Max / 期初价格），仅保留保底起点，避免误算
+        if not any(k in tail for k in ("Max", "期初价格", "期末价格", "收盘价格")):
+            flts = [float(x) for x in re.findall(r"(\d+(?:\.\d+)?)\s*%", tail) if 0.0 <= float(x) <= 10.0]
+            if 0.0 < base_v <= 12.0 and flts:
+                ymin = round(base_v + min(flts), 4)
+                ymax = round(base_v + max(flts), 4)
+                if 0.0 < ymax <= 12.0:
+                    return (_fmt_range(ymin, ymax), ymin, ymax)
 
-    pct_nums = re.findall(r"(\d+(?:\.\d+)?)\s*%", sanitized)
-    if not pct_nums:
-        cand = re.findall(r"(?<![\d.])(\d{1,2}(?:\.\d+)?)(?![\d.])", sanitized)
-        pct_nums = cand
+    # 4. 常规收益率解析：先剥离完整日期、汇率/价格阈值条件（如 '*【95%】' '>108%'）、期限数字
+    sanitized = re.sub(r"20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?", "", text)
+    # 剥离被正文粘连的后续条目（如 '1.67%7、产品期限：...'）
+    sanitized = re.split(r"\d+[、.]\s*(?:产品期限|投资期限|起息日|到期日)", sanitized)[0]
+    # 剥离条件价格比率（如 '*【95.0000】%'、'>108%'、'100%'、'Max[0%, 18%...'）
+    sanitized = re.sub(r"[*×<>≥≤]\s*[【\[]?\s*\d+(?:\.\d+)?\s*[】\]]?\s*%", "", sanitized)
+    sanitized = re.sub(r"Max\[[^\]]*\]", "", sanitized, flags=re.I)
+    sanitized = re.sub(r"\d+(?:天|个月|年|期|号|点)", "", sanitized)
+
+    pct_nums = re.findall(r"(\d+(?:\.\d+)?)\s*[】\]]?\s*%", sanitized)
+    if not pct_nums and len(sanitized) <= 20:
+        pct_nums = re.findall(r"(?<![\d.])(\d{1,2}(?:\.\d+)?)(?![\d.])", sanitized)
 
     vals = []
     for x in pct_nums:
@@ -492,11 +538,13 @@ def parse_yield_rate(raw: str) -> Tuple[str, Optional[float], Optional[float]]:
     ymin = round(min(vals), 4)
     ymax = round(max(vals), 4)
 
-    if re.fullmatch(r"[\d.\s%-~—至到/或]+", text):
-        if len(vals) == 1 or ymin == ymax:
-            pretty = f"{ymin:g}%"
+    # 若原文已是简洁区间，或原文过长（冗长分档说明/条款）但已精准提炼出明确 % 收益区间，则统一显示简洁区间
+    if re.fullmatch(r"[\d.\s%-~—至到/或]+", text) or len(text) > 16:
+        # 特殊：仅固定部分已知而浮动是期权公式（如 惠城环保 “固定1.2% + Max[...]”）保留简洁提示
+        if "浮动收益率" in text and any(k in text for k in ("Max", "期初价格", "收盘价格")):
+            pretty = f"固定{ymin:g}%+浮动"
         else:
-            pretty = f"{ymin:g}%-{ymax:g}%"
+            pretty = _fmt_range(ymin, ymax)
     else:
         pretty = text
 

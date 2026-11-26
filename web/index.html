@@ -247,13 +247,20 @@
   thead th.sortable:hover { background: #eef2ff; color: var(--primary); }
   tbody td {
     padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle;
-    max-width: 280px;
+    max-width: 280px; overflow-wrap: break-word;
   }
   tbody tr:hover { background: #f8fafc; }
   .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .ctr { text-align: center; white-space: nowrap; }
   .nowrap { white-space: nowrap; }
   .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; display: inline-block; vertical-align: bottom; }
+  .yield-cell { text-align: center; max-width: 170px; overflow: hidden; }
+  .yield-short { white-space: nowrap; font-weight: 700; color: var(--ink); }
+  .yield-long {
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; text-overflow: ellipsis; white-space: normal; word-break: break-word;
+    font-size: 11.5px; font-weight: 500; color: #475569; line-height: 1.35; text-align: left;
+  }
   .click-link { color: var(--navy); font-weight: 600; cursor: pointer; }
   .click-link:hover { color: var(--primary); text-decoration: underline; }
   .sub-meta { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
@@ -1588,6 +1595,14 @@ async function searchRecords(page = 1) {
         ? `<span style="color:#0f172a;font-weight:500;">${esc(it.branch_name)}</span>`
         : `<span style="color:#94a3b8;">未披露</span>`;
       const incDisp = it.actual_income_wan !== null ? fmtNum(it.actual_income_wan, 2) : '<span style="color:#cbd5e1;">-</span>';
+      const yrText = it.yield_rate_raw || '-';
+      const yieldCellHtml = yrText.length > 16
+        ? `<td class="yield-cell" title="${esc(yrText)}"><span class="yield-long">${esc(yrText)}</span></td>`
+        : `<td class="yield-cell"><span class="yield-short">${esc(yrText)}</span></td>`;
+      const endText = it.end_date || '-';
+      const endCellHtml = endText.length > 18
+        ? `<td class="yield-cell" title="${esc(endText)}"><span class="yield-long">${esc(endText)}</span></td>`
+        : `<td class="ctr nowrap">${esc(endText)}</td>`;
       return `<tr>
         <td>
           <span class="click-link" title="${esc(it.company_name)}" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</span>
@@ -1606,9 +1621,9 @@ async function searchRecords(page = 1) {
           <span class="sub-meta">${esc(it.product_type || '')}${it.product_type_raw && it.product_type_raw !== it.product_type ? ' · ' + esc(it.product_type_raw) : ''}</span>
         </td>
         <td class="num">${amtDisp}</td>
-        <td class="ctr"><strong>${esc(it.yield_rate_raw || '-')}</strong></td>
+        ${yieldCellHtml}
         <td class="ctr nowrap">${esc(it.start_date || '-')}</td>
-        <td class="ctr nowrap">${esc(it.end_date || '-')}</td>
+        ${endCellHtml}
         <td class="num">${incDisp}</td>
         <td class="ctr"><span class="badge b-gray">${esc(it.fund_source || '未注明')}</span></td>
         <td class="ctr nowrap">
