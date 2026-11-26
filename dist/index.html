@@ -1,0 +1,1946 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="format-detection" content="telephone=no" />
+<title>A股上市公司现金管理监测平台</title>
+<style>
+  :root {
+    --bg: #f1f5f9;
+    --card: #ffffff;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --navy: #0f294a;
+    --primary: #1d4ed8;
+    --primary-hover: #1e40af;
+    --green-bg: #dcfce7; --green-fg: #166534;
+    --red-bg: #fee2e2; --red-fg: #991b1b;
+    --amber-bg: #fef3c7; --amber-fg: #92400e;
+    --blue-bg: #dbeafe; --blue-fg: #1e40af;
+    --gray-bg: #f1f5f9; --gray-fg: #475569;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Topbar */
+  .topbar {
+    background: linear-gradient(135deg, #0b1f3a 0%, #153864 100%);
+    color: #fff;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, .18);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .brand-logo {
+    width: 36px; height: 36px; border-radius: 9px; flex-shrink: 0;
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.22);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 16px; letter-spacing: 1px;
+  }
+  .brand h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: .3px; }
+  .brand-sub { font-size: 12px; color: #cbd5e1; margin-top: 2px; }
+  .top-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .cloud-pill {
+    display: none; align-items: center; gap: 6px;
+    padding: 5px 11px; border-radius: 99px; font-size: 12px;
+    background: rgba(16, 185, 129, .18); border: 1px solid rgba(110, 231, 183, .38); color: #d1fae5;
+    white-space: nowrap;
+  }
+  .cloud-dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; display: inline-block; }
+
+  .btn {
+    border: 1px solid transparent; border-radius: 7px; padding: 7px 14px;
+    font-size: 13px; font-weight: 600; cursor: pointer; display: inline-flex;
+    align-items: center; justify-content: center; gap: 6px; transition: all .15s; font-family: inherit;
+    white-space: nowrap;
+  }
+  .btn-primary { background: #2563eb; color: #fff; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-emerald { background: #059669; color: #fff; }
+  .btn-emerald:hover { background: #047857; }
+  .btn-ghost { background: rgba(255,255,255,.12); color: #fff; border-color: rgba(255,255,255,.25); }
+  .btn-ghost:hover { background: rgba(255,255,255,.22); }
+  .btn-outline { background: #fff; color: var(--ink); border-color: #cbd5e1; }
+  .btn-outline:hover { background: #f8fafc; border-color: #94a3b8; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+  .container { max-width: 1600px; margin: 0 auto; padding: 16px 20px 44px; }
+
+  /* Sync banner */
+  .sync-bar {
+    display: none;
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a;
+    border-radius: 9px; padding: 10px 16px; margin-bottom: 14px;
+    align-items: center; justify-content: space-between; gap: 14px;
+  }
+  .sync-bar.show { display: flex; }
+  .progress-wrap { flex: 1; max-width: 320px; height: 8px; background: #dbeafe; border-radius: 99px; overflow: hidden; }
+  .progress-fill { height: 100%; background: #2563eb; width: 0%; transition: width .3s; }
+
+  /* KPI Cards */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .kpi {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 13px 15px; cursor: pointer; transition: all .15s;
+    position: relative; overflow: hidden;
+  }
+  .kpi:hover { border-color: #93c5fd; transform: translateY(-1px); box-shadow: 0 4px 14px rgba(15,23,42,.06); }
+  .kpi-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .kpi-val { font-size: 22px; font-weight: 700; margin: 5px 0 3px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .kpi-sub { font-size: 11.5px; color: var(--muted); }
+  .kpi-accent { border-left: 4px solid var(--primary); }
+  .kpi-green { border-left: 4px solid #16a34a; }
+  .kpi-red { border-left: 4px solid #dc2626; }
+  .kpi-amber { border-left: 4px solid #d97706; background: linear-gradient(180deg, #fffbeb 0%, #ffffff 60%); }
+  .kpi-slate { border-left: 4px solid #64748b; }
+
+  /* Tabs */
+  .tabs {
+    display: flex; gap: 6px; border-bottom: 2px solid var(--line); margin-bottom: 14px;
+    overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab {
+    padding: 9px 16px; font-weight: 600; font-size: 13.5px; color: var(--muted);
+    cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    border-radius: 7px 7px 0 0; transition: all .15s; white-space: nowrap; flex-shrink: 0;
+  }
+  .tab:hover { color: var(--ink); background: #e2e8f066; }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); background: #fff; }
+  .tab-badge {
+    display: inline-block; padding: 1px 7px; font-size: 11px; border-radius: 99px;
+    background: #e2e8f0; color: #334155; margin-left: 5px; font-weight: 600;
+  }
+  .tab.active .tab-badge { background: #dbeafe; color: #1d4ed8; }
+
+  /* Card Panel */
+  .panel {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(15,23,42,.03);
+  }
+
+  /* Quick filter pills */
+  .quick-pills {
+    display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; align-items: center;
+  }
+  .pill {
+    padding: 5px 12px; border-radius: 99px; border: 1px solid #cbd5e1; background: #fff;
+    color: #334155; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .12s;
+    white-space: nowrap; flex-shrink: 0;
+  }
+  .pill:hover { border-color: var(--primary); color: var(--primary); }
+  .pill.active { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .pill-warn.active { background: #b45309; border-color: #b45309; }
+
+  /* Mobile filter toggle bar (hidden on PC) */
+  .mobile-search-bar { display: none; gap: 8px; margin-bottom: 10px; align-items: center; }
+  .mobile-filter-toggle {
+    height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid #cbd5e1;
+    background: #f8fafc; color: var(--navy); font-weight: 600; font-size: 12.5px;
+    display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  }
+  .mobile-filter-toggle.has-active { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+  .mobile-sort-bar {
+    display: none; align-items: center; justify-content: space-between; gap: 8px;
+    margin-bottom: 10px; padding: 8px 12px; background: #fff; border: 1px solid var(--line); border-radius: 8px;
+  }
+
+  /* Filter Grid */
+  .filter-grid {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 8px 10px;
+    align-items: end;
+  }
+  .field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .field label { font-size: 11.5px; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .field input, .field select {
+    height: 32px; padding: 0 9px; border: 1px solid #cbd5e1; border-radius: 6px;
+    font-size: 12.5px; color: var(--ink); background: #fff; font-family: inherit;
+    outline: none; width: 100%; min-width: 0;
+  }
+  .field input:focus, .field select:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(37,99,235,.12); }
+  .range-pair { display: flex; gap: 5px; align-items: center; min-width: 0; }
+  .range-pair input { flex: 1; min-width: 0; }
+  .range-pair span { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+  .span-2 { grid-column: span 2; }
+  .filter-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+  .filter-actions .btn { height: 32px; padding: 0 16px; white-space: nowrap; }
+
+  /* Clearable input & Custom searchable combobox */
+  .input-clear-wrap { position: relative; display: flex; align-items: center; width: 100%; }
+  .input-clear-wrap input { padding-right: 44px; }
+  .clear-btn {
+    position: absolute; right: 24px; top: 50%; transform: translateY(-50%);
+    width: 18px; height: 18px; border-radius: 50%; border: none;
+    background: #e2e8f0; color: #475569; font-size: 12px; line-height: 18px;
+    text-align: center; cursor: pointer; display: none; padding: 0;
+  }
+  .clear-btn:hover { background: #cbd5e1; color: #0f172a; }
+  .clear-btn.solo { right: 7px; }
+  .combo-arrow {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    width: 20px; height: 24px; border: none; background: transparent;
+    color: #64748b; cursor: pointer; font-size: 11px; padding: 0;
+  }
+  .combo-arrow:hover { color: var(--primary); }
+  .combo-menu {
+    display: none; position: absolute; left: 0; right: 0; top: 35px; z-index: 40;
+    background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+    box-shadow: 0 10px 28px rgba(15,23,42,.14); max-height: 280px; overflow-y: auto;
+    padding: 4px 0;
+  }
+  .combo-menu.show { display: block; }
+  .combo-item {
+    padding: 8px 11px; cursor: pointer; display: flex; justify-content: space-between;
+    align-items: center; font-size: 12.5px; color: var(--ink);
+  }
+  .combo-item:hover { background: #eff6ff; color: var(--primary); }
+  .combo-item.selected { background: #dbeafe; color: #1e40af; font-weight: 600; }
+  .combo-item .cnt { font-size: 11px; color: var(--muted); }
+  .combo-item.reset-opt { border-bottom: 1px solid #f1f5f9; color: var(--primary); font-weight: 600; }
+
+  .filter-footer {
+    margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  }
+  .summary-strip { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: #334155; }
+  .summary-strip b { color: var(--navy); font-size: 13.5px; }
+
+  /* Desktop Data Table */
+  .table-wrap {
+    overflow-x: auto; border: 1px solid var(--line); border-radius: 8px;
+    max-height: 64vh; overflow-y: auto; background: #fff;
+    -webkit-overflow-scrolling: touch;
+  }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
+  thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: #f8fafc; color: #334155; font-weight: 700;
+    padding: 9px 10px; text-align: left; border-bottom: 2px solid #cbd5e1;
+    white-space: nowrap; user-select: none;
+  }
+  thead th.sortable { cursor: pointer; }
+  thead th.sortable:hover { background: #eef2ff; color: var(--primary); }
+  tbody td {
+    padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: middle;
+    max-width: 280px;
+  }
+  tbody tr:hover { background: #f8fafc; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .ctr { text-align: center; white-space: nowrap; }
+  .nowrap { white-space: nowrap; }
+  .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; display: inline-block; vertical-align: bottom; }
+  .click-link { color: var(--navy); font-weight: 600; cursor: pointer; }
+  .click-link:hover { color: var(--primary); text-decoration: underline; }
+  .sub-meta { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+
+  /* Mobile Card List (shown on <= 768px) */
+  .mobile-cards { display: none; flex-direction: column; gap: 10px; }
+  .m-card {
+    background: #fff; border: 1px solid var(--line); border-radius: 11px;
+    padding: 12px 13px; box-shadow: 0 1px 4px rgba(15,23,42,.04);
+    max-width: 100%; overflow: hidden;
+  }
+  .m-card-head {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+    padding-bottom: 9px; border-bottom: 1px solid #f1f5f9;
+  }
+  .m-comp-name { font-size: 14.5px; font-weight: 700; color: var(--navy); line-height: 1.3; word-break: break-word; }
+  .m-comp-sub { font-size: 11.5px; color: var(--muted); margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .m-region-chip {
+    display: inline-block; padding: 1px 7px; border-radius: 4px;
+    background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; font-size: 11px; font-weight: 600;
+  }
+  .m-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+  .m-hero {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+    padding: 9px 0 8px;
+  }
+  .m-amt { font-size: 19px; font-weight: 800; color: #0f172a; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .m-amt small { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 2px; }
+  .m-yield {
+    font-size: 12.5px; font-weight: 700; color: #b45309;
+    background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 3px 8px;
+    max-width: 100%; overflow-wrap: anywhere; word-break: break-word; line-height: 1.3;
+  }
+  .m-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px;
+    font-size: 12px; background: #f8fafc; border-radius: 8px; padding: 8px 10px;
+  }
+  .m-kv-full { grid-column: span 2; }
+  .m-k { color: var(--muted); font-size: 11px; display: block; }
+  .m-v { color: var(--ink); font-weight: 600; word-break: break-all; }
+  .m-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    margin-top: 9px; padding-top: 8px; border-top: 1px dashed #e2e8f0; font-size: 11.5px; color: var(--muted);
+  }
+  .m-pdf-btn {
+    padding: 5px 11px; border-radius: 6px; background: #eff6ff; color: #1d4ed8;
+    border: 1px solid #bfdbfe; font-weight: 600; font-size: 12px; white-space: nowrap;
+  }
+
+  /* Status Badges */
+  .badge {
+    display: inline-block; padding: 2px 8px; border-radius: 99px;
+    font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  }
+  .b-active { background: var(--green-bg); color: var(--green-fg); }
+  .b-matured { background: var(--red-bg); color: var(--red-fg); }
+  .b-redeemed { background: var(--amber-bg); color: var(--amber-fg); }
+  .b-flex { background: var(--blue-bg); color: var(--blue-fg); }
+  .b-gray { background: var(--gray-bg); color: var(--gray-fg); }
+  .b-buy { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+  .b-red { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+
+  /* Pagination */
+  .pager {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 12px; flex-wrap: wrap; gap: 10px;
+  }
+  .pager-controls { display: flex; align-items: center; gap: 6px; }
+
+  /* Rankings Grid */
+  .rank-grid { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 14px; }
+  .bar-bg { width: 100%; height: 6px; background: #e2e8f0; border-radius: 99px; overflow: hidden; margin-top: 4px; }
+  .bar-fg { height: 100%; background: linear-gradient(90deg, #2563eb, #0ea5e9); border-radius: 99px; }
+
+  /* Modal */
+  .modal-mask {
+    display: none; position: fixed; inset: 0; background: rgba(15,23,42,.5);
+    z-index: 50; align-items: center; justify-content: center; padding: 16px;
+  }
+  .modal-mask.show { display: flex; }
+  .modal {
+    background: #fff; border-radius: 12px; width: 100%; max-width: 460px;
+    padding: 20px 22px; box-shadow: 0 20px 50px rgba(0,0,0,.25);
+  }
+  .modal h3 { margin: 0 0 12px; font-size: 16px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+
+  .hidden { display: none !important; }
+  .empty { text-align: center; padding: 36px 16px; color: var(--muted); }
+
+  /* Tablet */
+  @media (max-width: 1280px) {
+    .filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .rank-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Mobile Phone (<= 768px) */
+  @media (max-width: 768px) {
+    body { font-size: 13px; }
+    .topbar { padding: 12px 14px; gap: 10px; }
+    .brand-logo { width: 32px; height: 32px; font-size: 14px; }
+    .brand h1 { font-size: 15.5px; }
+    .brand-sub { font-size: 11px; }
+    .top-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .top-actions .cloud-pill { grid-column: span 2; justify-content: center; }
+    .top-actions .btn { padding: 7px 10px; font-size: 12px; }
+
+    .container { padding: 10px 10px 36px; }
+    .panel { padding: 11px 12px; border-radius: 9px; margin-bottom: 10px; }
+
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+    .kpi { padding: 10px 11px; }
+    .kpi:last-child { grid-column: span 2; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .kpi:last-child .kpi-val { margin: 0; font-size: 18px; }
+    .kpi-label { font-size: 11px; }
+    .kpi-label span:last-child { display: none; }
+    .kpi-val { font-size: 19px; margin: 3px 0 2px; }
+    .kpi-sub { font-size: 11px; }
+
+    .tab { padding: 8px 12px; font-size: 13px; }
+
+    .quick-pills {
+      flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch;
+      padding-bottom: 4px; margin-bottom: 8px; scrollbar-width: none;
+    }
+    .quick-pills::-webkit-scrollbar { display: none; }
+    .quick-pills > span { display: none; }
+
+    .mobile-search-bar { display: flex; }
+    .mobile-sort-bar { display: flex; }
+
+    .adv-filters { display: none; margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--line); }
+    .adv-filters.open { display: block; }
+    .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .field.desktop-only-search { display: none; }
+    .field input, .field select { height: 36px; font-size: 13px; }
+    .combo-menu { top: 38px; }
+    .span-2 { grid-column: span 2; }
+
+    .filter-footer { flex-direction: column; align-items: stretch; gap: 8px; margin-top: 8px; padding-top: 8px; }
+    .summary-strip { gap: 6px 12px; font-size: 12px; }
+    .filter-actions { justify-content: space-between; }
+    .filter-actions .btn { flex: 1; height: 36px; }
+
+    /* Switch desktop table -> mobile cards */
+    #desktopTableWrap { display: none; }
+    #mobileCardList { display: flex; }
+
+    .pager { justify-content: center; }
+  }
+</style>
+<script>window.__STATIC_MODE__ = true; window.__DATA_VER__ = "202611261525";</script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-logo">CM</div>
+    <div>
+      <h1>A股上市公司现金管理监测平台</h1>
+      <div class="brand-sub" id="subtitleText">沪深北全市场 · 新购与到期赎回明细总表 · 省市区域全覆盖</div>
+    </div>
+  </div>
+  <div class="top-actions">
+    <span class="cloud-pill" id="cloudBadge"><span class="cloud-dot"></span><span id="cloudBadgeText">云端每日自动更新</span></span>
+    <button class="btn btn-emerald" onclick="exportExcel(false)">导出当前筛选 Excel</button>
+    <button class="btn btn-ghost" onclick="exportExcel(true)">下载全量汇总 Excel</button>
+    <button class="btn btn-primary" id="btnOpenSync" onclick="openSyncModal()">同步最新公告</button>
+  </div>
+</div>
+
+<div class="container">
+  <!-- Live Sync Status Bar (local mode) -->
+  <div class="sync-bar" id="syncBar">
+    <div style="display:flex;align-items:center;gap:10px;flex:1;">
+      <strong id="syncPhase">同步中</strong>
+      <span id="syncMsg">正在连接巨潮资讯网...</span>
+    </div>
+    <div class="progress-wrap"><div class="progress-fill" id="syncFill"></div></div>
+    <span id="syncPct" style="font-weight:700;min-width:44px;text-align:right;">0%</span>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="kpi-grid">
+    <div class="kpi kpi-accent" onclick="applyQuickStatus('')">
+      <div class="kpi-label"><span>明细总笔数（新购+赎回）</span><span>点击查全部</span></div>
+      <div class="kpi-val" id="kpiTotal">-</div>
+      <div class="kpi-sub" id="kpiTotalSub">加载中...</div>
+    </div>
+    <div class="kpi kpi-green" onclick="applyQuickStatus('存续中')">
+      <div class="kpi-label"><span>存续中（未到期）</span><span>点击筛选</span></div>
+      <div class="kpi-val" id="kpiActive">-</div>
+      <div class="kpi-sub" id="kpiActiveSub">含随时可转/赎：-</div>
+    </div>
+    <div class="kpi kpi-red" onclick="applyQuickStatus('已到期合集')">
+      <div class="kpi-label"><span>已到期（含到期赎回）</span><span>点击筛选</span></div>
+      <div class="kpi-val" id="kpiMatured">-</div>
+      <div class="kpi-sub" id="kpiMaturedSub">其中赎回明细：-</div>
+    </div>
+    <div class="kpi kpi-amber" onclick="applyQuickStatus('即将30天到期')">
+      <div class="kpi-label"><span>未来 30 天即将到期</span><span>重点拓客</span></div>
+      <div class="kpi-val" id="kpiExp30">-</div>
+      <div class="kpi-sub" id="kpiExp30Sub">到期规模：-</div>
+    </div>
+    <div class="kpi kpi-slate" onclick="switchTab('review')">
+      <div>
+        <div class="kpi-label"><span>待人工复核公告</span><span>点击核对</span></div>
+        <div class="kpi-sub" id="kpiReviewSub">已扫描公告：-</div>
+      </div>
+      <div class="kpi-val" id="kpiReview">-</div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <div class="tab active" data-tab="records" onclick="switchTab('records')">理财明细总表 <span class="tab-badge" id="badgeRecords">0</span></div>
+    <div class="tab" data-tab="rankings" onclick="switchTab('rankings')">银行 / 券商 / 分行排行</div>
+    <div class="tab" data-tab="companies" onclick="switchTab('companies')">上市公司采购排行</div>
+    <div class="tab" data-tab="review" onclick="switchTab('review')">待复核公告 <span class="tab-badge" id="badgeReview">0</span></div>
+  </div>
+
+  <!-- TAB 1: RECORDS -->
+  <div id="view-records">
+    <div class="panel">
+      <div class="quick-pills">
+        <span style="font-size:12px;color:var(--muted);font-weight:600;">快捷视图：</span>
+        <button class="pill active" data-quick="all" onclick="setQuickPreset('all')">全部明细</button>
+        <button class="pill" data-quick="active" onclick="setQuickPreset('active')">存续中</button>
+        <button class="pill" data-quick="matured" onclick="setQuickPreset('matured')">已到期(含赎回)</button>
+        <button class="pill pill-warn" data-quick="exp30" onclick="setQuickPreset('exp30')">未来30天到期</button>
+        <button class="pill" data-quick="buy" onclick="setQuickPreset('buy')">仅本次新购</button>
+        <button class="pill" data-quick="redeem" onclick="setQuickPreset('redeem')">仅到期赎回</button>
+        <button class="pill" data-quick="flex" onclick="setQuickPreset('flex')">随时可转/赎</button>
+        <button class="pill" data-quick="branch" onclick="setQuickPreset('branch')">有具体分行</button>
+      </div>
+
+      <!-- Mobile quick search + filter drawer toggle -->
+      <div class="mobile-search-bar">
+        <div class="input-clear-wrap" style="flex:1;">
+          <input type="text" id="f_q_mobile" style="height:36px;border:1px solid #cbd5e1;border-radius:8px;padding:0 32px 0 10px;width:100%;font-size:13px;"
+                 placeholder="搜公司 / 省市 / 银行 / 分行 / 产品"
+                 oninput="syncMobileSearch(this.value)" onkeydown="if(event.key==='Enter')searchRecords(1)" />
+          <button type="button" class="clear-btn solo" id="clr_q_m" onclick="clearField('f_q')">×</button>
+        </div>
+        <button type="button" class="mobile-filter-toggle" id="btnMobFilter" onclick="toggleMobileFilters()">
+          <span>筛选</span><span id="mobFilterBadge"></span>
+        </button>
+      </div>
+
+      <div class="adv-filters" id="advFilters">
+        <div class="filter-grid">
+          <div class="field span-2 desktop-only-search">
+            <label>全局关键词（上市公司 / 代码 / 省市 / 银行 / 分行 / 券商 / 产品名）</label>
+            <div class="input-clear-wrap">
+              <input type="text" id="f_q" placeholder="如：濮阳惠成 / 苏州 / 福建海峡银行 / 结构性存款" oninput="syncDesktopSearch(this.value)" onkeydown="if(event.key==='Enter')searchRecords(1)" />
+              <button type="button" class="clear-btn solo" id="clr_q" title="清空" onclick="clearField('f_q')">×</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>机构类型</label>
+            <select id="f_inst_type" onchange="searchRecords(1)">
+              <option value="">全部机构</option>
+              <option value="银行">银行</option>
+              <option value="券商">券商</option>
+              <option value="银行理财子">银行理财子</option>
+              <option value="信托">信托</option>
+              <option value="基金/资管">基金/资管</option>
+              <option value="其他">其他</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>主机构（银行/券商）</label>
+            <div class="input-clear-wrap" id="instComboWrap">
+              <input type="text" id="f_inst_main" autocomplete="off" placeholder="全部主机构（点击选择或搜索）"
+                     onfocus="openInstCombo(true)" oninput="onInstInput()" onkeydown="if(event.key==='Enter'){closeInstCombo();searchRecords(1);}" />
+              <button type="button" class="clear-btn" id="clr_inst" title="清空并返回全部" onclick="selectInstOption('')">×</button>
+              <button type="button" class="combo-arrow" title="展开全部机构" onclick="toggleInstCombo()">▾</button>
+              <div class="combo-menu" id="instComboMenu"></div>
+            </div>
+          </div>
+          <div class="field">
+            <label>分支行 / 营业部</label>
+            <div class="input-clear-wrap">
+              <input type="text" id="f_branch" placeholder="如：深圳分行 / 支行" oninput="syncClearBtns()" onkeydown="if(event.key==='Enter')searchRecords(1)" />
+              <button type="button" class="clear-btn solo" id="clr_branch" title="清空" onclick="clearField('f_branch')">×</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>产品类型</label>
+            <select id="f_prod_type" onchange="searchRecords(1)">
+              <option value="">全部产品</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>上市公司区域（省份）</label>
+            <select id="f_province" onchange="onProvinceChange()">
+              <option value="">全部省份</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>上市公司区域（城市）</label>
+            <select id="f_city" onchange="searchRecords(1)">
+              <option value="">全部城市</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>市场板块</label>
+            <select id="f_market" onchange="searchRecords(1)">
+              <option value="">沪深北全市场</option>
+              <option value="沪市">沪市</option>
+              <option value="深市">深市</option>
+              <option value="北交所">北交所</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>资金来源</label>
+            <select id="f_fund" onchange="searchRecords(1)">
+              <option value="">募集 + 自有资金</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>金额区间（万元）</label>
+            <div class="range-pair">
+              <input type="number" id="f_min_amt" placeholder="最低" onkeydown="if(event.key==='Enter')searchRecords(1)" />
+              <span>-</span>
+              <input type="number" id="f_max_amt" placeholder="最高" onkeydown="if(event.key==='Enter')searchRecords(1)" />
+            </div>
+          </div>
+          <div class="field">
+            <label>年化收益率区间（%）</label>
+            <div class="range-pair">
+              <input type="number" step="0.1" id="f_min_yld" placeholder="最低%" onkeydown="if(event.key==='Enter')searchRecords(1)" />
+              <span>-</span>
+              <input type="number" step="0.1" id="f_max_yld" placeholder="最高%" onkeydown="if(event.key==='Enter')searchRecords(1)" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>交易类型</label>
+            <select id="f_rec_type" onchange="searchRecords(1)">
+              <option value="">新购 + 到期赎回</option>
+              <option value="本次新购">本次新购</option>
+              <option value="到期赎回">到期赎回</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>当前到期状态</label>
+            <select id="f_status" onchange="searchRecords(1)">
+              <option value="">全部状态</option>
+              <option value="存续中">存续中（未到期）</option>
+              <option value="已到期合集">已到期（含到期赎回）</option>
+              <option value="已到期">已到期（新购已过到期日）</option>
+              <option value="已到期赎回">已到期赎回</option>
+              <option value="随时可转让/赎回">随时可转让/赎回</option>
+              <option value="即将30天到期">未来30天即将到期</option>
+              <option value="即将7天到期">未来7天即将到期</option>
+            </select>
+          </div>
+          <div class="field span-2">
+            <label>公告日期区间</label>
+            <div class="range-pair">
+              <input type="date" id="f_ann_from" onchange="searchRecords(1)" />
+              <span>至</span>
+              <input type="date" id="f_ann_to" onchange="searchRecords(1)" />
+            </div>
+          </div>
+          <div class="field span-2">
+            <label>到期日期区间（仅明确日期）</label>
+            <div class="range-pair">
+              <input type="date" id="f_end_from" onchange="searchRecords(1)" />
+              <span>至</span>
+              <input type="date" id="f_end_to" onchange="searchRecords(1)" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="filter-footer">
+        <div class="summary-strip">
+          <span>匹配：<b id="sumCount">0</b> 笔</span>
+          <span>合计：<b id="sumAmtYi">0</b> 亿元 <span style="color:var(--muted);font-size:11.5px;">(<span id="sumAmt">0</span>万)</span></span>
+          <span>公司：<b id="sumComp">0</b> 家</span>
+          <span>机构：<b id="sumInst">0</b> 家</span>
+          <span>均收益上限：<b id="sumYld">-</b></span>
+        </div>
+        <div class="filter-actions">
+          <button class="btn btn-primary" onclick="applyAndCollapseMobile()">查询筛选</button>
+          <button class="btn btn-outline" onclick="resetFilters()">重置条件</button>
+          <span style="width:1px;height:18px;background:#e2e8f0;margin:0 2px;"></span>
+          <select id="pageSizeSel" style="height:32px;border:1px solid #cbd5e1;border-radius:6px;padding:0 8px;background:#fff;" onchange="searchRecords(1)">
+            <option value="50" selected>50 条/页</option>
+            <option value="100">100 条/页</option>
+            <option value="200">200 条/页</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mobile Sort Bar -->
+    <div class="mobile-sort-bar">
+      <span style="font-size:12px;color:var(--muted);font-weight:600;">排序方式</span>
+      <select id="mobSortSel" style="height:30px;border:1px solid #cbd5e1;border-radius:6px;padding:0 8px;font-size:12.5px;background:#fff;" onchange="onMobileSortChange()">
+        <option value="announce_date:desc">公告日期（最新优先）</option>
+        <option value="amount_wan:desc">金额（从高到低）</option>
+        <option value="yield_max:desc">收益率（从高到低）</option>
+        <option value="end_date_iso:asc">到期日期（最近优先）</option>
+        <option value="province:asc">按省市区域排序</option>
+      </select>
+    </div>
+
+    <!-- Desktop Table -->
+    <div class="table-wrap" id="desktopTableWrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable" onclick="toggleSort('company_name')">上市公司主体 <span id="sort_company_name"></span></th>
+            <th class="ctr sortable" onclick="toggleSort('province')">区域 <span id="sort_province"></span></th>
+            <th class="ctr">交易类型</th>
+            <th class="ctr">当前状态</th>
+            <th class="sortable" onclick="toggleSort('institution_main')">受托机构（银行/券商） <span id="sort_institution_main"></span></th>
+            <th>分支行 / 营业部</th>
+            <th>产品名称 & 类型</th>
+            <th class="num sortable" onclick="toggleSort('amount_wan')">金额（万元） <span id="sort_amount_wan"></span></th>
+            <th class="ctr sortable" onclick="toggleSort('yield_max')">收益率区间 <span id="sort_yield_max"></span></th>
+            <th class="ctr sortable" onclick="toggleSort('start_date')">开始日期 <span id="sort_start_date"></span></th>
+            <th class="ctr sortable" onclick="toggleSort('end_date_iso')">到期日期 <span id="sort_end_date_iso"></span></th>
+            <th class="num">实际收益(万)</th>
+            <th class="ctr">资金来源</th>
+            <th class="ctr sortable" onclick="toggleSort('announce_date')">公告日 / 原文 <span id="sort_announce_date">▼</span></th>
+          </tr>
+        </thead>
+        <tbody id="recordsTbody">
+          <tr><td colspan="14" class="empty">正在加载数据...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Mobile Card List -->
+    <div class="mobile-cards" id="mobileCardList">
+      <div class="empty">正在加载数据...</div>
+    </div>
+
+    <div class="pager">
+      <div id="pagerInfo" style="color:var(--muted);font-size:12.5px;">-</div>
+      <div class="pager-controls">
+        <button class="btn btn-outline btn-sm" id="btnPrev" onclick="goPage(-1)">上一页</button>
+        <span id="pageNumLabel" style="padding:0 8px;font-weight:600;">1 / 1</span>
+        <button class="btn btn-outline btn-sm" id="btnNext" onclick="goPage(1)">下一页</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 2: RANKINGS -->
+  <div id="view-rankings" class="hidden">
+    <div class="panel" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <strong>统计口径：</strong>
+      <select id="rk_rec_type" style="height:32px;border:1px solid #cbd5e1;border-radius:6px;padding:0 10px;" onchange="loadRankings()">
+        <option value="本次新购" selected>仅统计本次新购</option>
+        <option value="到期赎回">仅统计到期赎回</option>
+        <option value="全部">新购 + 到期赎回全部</option>
+      </select>
+      <select id="rk_inst_type" style="height:32px;border:1px solid #cbd5e1;border-radius:6px;padding:0 10px;" onchange="loadRankings()">
+        <option value="">全部机构类型</option>
+        <option value="银行">仅银行</option>
+        <option value="券商">仅券商</option>
+        <option value="银行理财子">仅银行理财子</option>
+        <option value="信托">仅信托</option>
+      </select>
+      <span style="color:var(--muted);font-size:12px;">点击任意银行、券商或分行名称，直接跳到总表看大单</span>
+    </div>
+
+    <div class="rank-grid">
+      <div class="panel">
+        <h3 style="margin:0 0 10px;font-size:15px;">银行 / 券商吸金排行榜（人民币口径）</h3>
+        <div class="table-wrap" style="max-height:58vh;">
+          <table>
+            <thead>
+              <tr>
+                <th class="ctr">#</th>
+                <th>主机构名称</th>
+                <th class="ctr">类型</th>
+                <th class="num">总金额（万元）</th>
+                <th class="num">笔数</th>
+                <th class="num">上市公司</th>
+                <th class="num">平均收益</th>
+              </tr>
+            </thead>
+            <tbody id="rankInstTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div class="panel">
+          <h3 style="margin:0 0 10px;font-size:15px;">产品类型分布 & 平均收益对比</h3>
+          <div class="table-wrap" style="max-height:260px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>产品类型</th>
+                  <th class="num">总金额（万元）</th>
+                  <th class="num">笔数</th>
+                  <th class="num">均下限%</th>
+                  <th class="num">均上限%</th>
+                </tr>
+              </thead>
+              <tbody id="rankProdTbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3 style="margin:0 0 10px;font-size:15px;">活跃分支行 / 营业部排行</h3>
+          <div class="table-wrap" style="max-height:280px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>主机构 & 分支行</th>
+                  <th class="num">总金额（万元）</th>
+                  <th class="num">笔数</th>
+                  <th class="num">客户数</th>
+                </tr>
+              </thead>
+              <tbody id="rankBranchTbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 3: COMPANIES -->
+  <div id="view-companies" class="hidden">
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+        <h3 style="margin:0;font-size:15px;">上市公司现金管理采购排行榜（Top 100）</h3>
+        <select id="comp_rec_type" style="height:30px;border:1px solid #cbd5e1;border-radius:6px;padding:0 10px;" onchange="loadCompanyRankings()">
+          <option value="本次新购" selected>仅本次新购</option>
+          <option value="到期赎回">仅到期赎回</option>
+          <option value="全部">全部记录</option>
+        </select>
+      </div>
+      <div class="table-wrap" style="max-height:66vh;">
+        <table>
+          <thead>
+            <tr>
+              <th class="ctr">#</th>
+              <th>上市公司主体名称</th>
+              <th class="ctr">代码</th>
+              <th class="ctr">所在省市</th>
+              <th class="ctr">市场</th>
+              <th class="num">总金额（万元）</th>
+              <th class="num">折合（亿元）</th>
+              <th class="num">笔数</th>
+              <th class="num">机构数</th>
+              <th class="num">均上限%</th>
+            </tr>
+          </thead>
+          <tbody id="rankCompTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: REVIEW -->
+  <div id="view-review" class="hidden">
+    <div class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap;">
+        <div>
+          <h3 style="margin:0;font-size:15px;">待人工复核公告清单</h3>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">极少数无框表格、扫描件或特殊排版公告，点击右侧链接可直接在线打开巨潮原文 PDF 核对。</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="loadReview(1)">刷新清单</button>
+      </div>
+      <div class="table-wrap" style="max-height:64vh;">
+        <table>
+          <thead>
+            <tr>
+              <th class="ctr">公告日期</th>
+              <th>上市公司</th>
+              <th class="ctr">市场</th>
+              <th>公告标题</th>
+              <th class="ctr">状态</th>
+              <th>原因说明</th>
+              <th class="ctr">原文PDF</th>
+            </tr>
+          </thead>
+          <tbody id="reviewTbody"></tbody>
+        </table>
+      </div>
+      <div class="pager">
+        <div id="revPagerInfo" style="color:var(--muted);font-size:12.5px;">-</div>
+        <div class="pager-controls">
+          <button class="btn btn-outline btn-sm" id="btnRevPrev" onclick="goRevPage(-1)">上一页</button>
+          <span id="revPageLabel" style="padding:0 8px;font-weight:600;">1 / 1</span>
+          <button class="btn btn-outline btn-sm" id="btnRevNext" onclick="goRevPage(1)">下一页</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Sync Modal (local mode only) -->
+<div class="modal-mask" id="syncModal">
+  <div class="modal">
+    <h3>在线增量同步最新公告</h3>
+    <p style="font-size:12.5px;color:var(--muted);margin:0 0 14px;">
+      直接从巨潮资讯网在线内存流式解析 PDF（本地不保存任何 PDF 原文件），同步完成后自动更新本地数据库和最新汇总 Excel。
+    </p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+      <div class="field">
+        <label>开始日期（留空默认近3个月）</label>
+        <input type="date" id="sync_from" />
+      </div>
+      <div class="field">
+        <label>结束日期（留空默认今天）</label>
+        <input type="date" id="sync_to" />
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;cursor:pointer;">
+      <input type="checkbox" id="sync_inc" checked />
+      仅同步尚未处理过的新增公告（增量模式，速度快）
+    </label>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeSyncModal()">取消</button>
+      <button class="btn btn-primary" onclick="startSync()">开始同步</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const IS_STATIC = Boolean(window.__STATIC_MODE__);
+const DATA_VER = window.__DATA_VER__ || String(Date.now());
+
+const state = {
+  tab: 'records',
+  page: 1,
+  total: 0,
+  sort_by: 'announce_date',
+  sort_dir: 'desc',
+  revPage: 1,
+  revTotal: 0,
+  syncTimer: null,
+  allInstitutions: [],
+  // Static mode in-memory store
+  staticReady: false,
+  staticRecords: [],
+  staticMeta: null,
+  lastFilteredStatic: [],
+};
+
+function esc(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtNum(n, dec=2) {
+  if (n === null || n === undefined || isNaN(n)) return '-';
+  return Number(n).toLocaleString('zh-CN', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+function fmtInt(n) {
+  if (n === null || n === undefined) return '0';
+  return Number(n).toLocaleString('zh-CN');
+}
+function getBjTodayStr(offsetDays = 0) {
+  const now = new Date();
+  const bjMs = now.getTime() + (now.getTimezoneOffset() + 480) * 60000 + offsetDays * 86400000;
+  const d = new Date(bjMs);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/* ==================== STATIC ENGINE (Cloud Zero-Backend Mode) ==================== */
+async function initStaticData() {
+  if (state.staticReady) return;
+  const [recJson, metaJson] = await Promise.all([
+    fetch(`./data/records.json?v=${DATA_VER}`).then(r => r.json()),
+    fetch(`./data/meta.json?v=${DATA_VER}`).then(r => r.json()),
+  ]);
+  const fields = recJson.fields || [];
+  const todayStr = getBjTodayStr(0);
+  const recs = (recJson.rows || []).map((arr, idx) => {
+    const obj = { id: idx + 1 };
+    for (let i = 0; i < fields.length; i++) obj[fields[i]] = arr[i];
+    // 按浏览器当日北京时间动态校准存续/已到期状态
+    if (obj.record_type === '本次新购' && obj.end_date_iso) {
+      if ((obj.maturity_status === '存续中' || obj.maturity_status === '未知') && obj.end_date_iso <= todayStr) {
+        obj.maturity_status = '已到期';
+      }
+    }
+    obj._search = [
+      obj.company_name, obj.sec_name, obj.sec_code, obj.province, obj.city,
+      obj.institution_main, obj.branch_name, obj.product_name
+    ].filter(Boolean).join('|').toLowerCase();
+    return obj;
+  });
+  state.staticRecords = recs;
+  state.staticMeta = metaJson;
+  state.staticReady = true;
+
+  // 静态云端模式 UI 调整：隐藏本地同步按钮，展示云端自动更新状态
+  document.getElementById('btnOpenSync').classList.add('hidden');
+  const cb = document.getElementById('cloudBadge');
+  cb.style.display = 'inline-flex';
+  document.getElementById('cloudBadgeText').textContent = `云端每日自动更新 · ${metaJson.generated_at || recJson.generated_at || ''}`;
+}
+
+function getFilterObject() {
+  const map = {
+    q: 'f_q',
+    province: 'f_province',
+    city: 'f_city',
+    institution_type: 'f_inst_type',
+    institution_main: 'f_inst_main',
+    branch_name: 'f_branch',
+    product_type: 'f_prod_type',
+    record_type: 'f_rec_type',
+    maturity_status: 'f_status',
+    fund_source: 'f_fund',
+    market: 'f_market',
+    min_amount: 'f_min_amt',
+    max_amount: 'f_max_amt',
+    min_yield: 'f_min_yld',
+    max_yield: 'f_max_yld',
+    ann_from: 'f_ann_from',
+    ann_to: 'f_ann_to',
+    end_from: 'f_end_from',
+    end_to: 'f_end_to',
+  };
+  const f = {};
+  for (const [k, id] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    const v = el ? (el.value || '').trim() : '';
+    if (v) f[k] = v;
+  }
+  return f;
+}
+
+function staticMatchList(records, f) {
+  const q = (f.q || '').toLowerCase();
+  const minAmt = f.min_amount !== undefined ? Number(f.min_amount) : null;
+  const maxAmt = f.max_amount !== undefined ? Number(f.max_amount) : null;
+  const minYld = f.min_yield !== undefined ? Number(f.min_yield) : null;
+  const maxYld = f.max_yield !== undefined ? Number(f.max_yield) : null;
+  const todayStr = getBjTodayStr(0);
+  const plus30 = getBjTodayStr(30);
+  const plus7 = getBjTodayStr(7);
+  const brLow = (f.branch_name || '').toLowerCase();
+
+  return records.filter(r => {
+    if (q && !r._search.includes(q)) return false;
+    if (f.market && r.market !== f.market) return false;
+    if (f.province && r.province !== f.province) return false;
+    if (f.city && r.city !== f.city) return false;
+    if (f.record_type && r.record_type !== f.record_type) return false;
+    if (f.institution_type && r.institution_type !== f.institution_type) return false;
+    if (f.institution_main && r.institution_main !== f.institution_main) return false;
+    if (f.product_type && r.product_type !== f.product_type) return false;
+    if (f.fund_source && r.fund_source !== f.fund_source) return false;
+    if (f.branch_name) {
+      if (f.branch_name === '__HAS_BRANCH__') {
+        if (!r.branch_name || r.branch_name === '未披露') return false;
+      } else if (!(r.branch_name || '').toLowerCase().includes(brLow)) {
+        return false;
+      }
+    }
+    if (f.maturity_status) {
+      const st = f.maturity_status;
+      if (st === '已到期合集') {
+        if (r.maturity_status !== '已到期' && r.maturity_status !== '已到期赎回') return false;
+      } else if (st === '即将30天到期') {
+        if (!(r.record_type === '本次新购' && r.maturity_status === '存续中' && r.end_date_iso >= todayStr && r.end_date_iso <= plus30)) return false;
+      } else if (st === '即将7天到期') {
+        if (!(r.record_type === '本次新购' && r.maturity_status === '存续中' && r.end_date_iso >= todayStr && r.end_date_iso <= plus7)) return false;
+      } else if (r.maturity_status !== st) {
+        return false;
+      }
+    }
+    if (minAmt !== null && (r.amount_wan === null || r.amount_wan < minAmt)) return false;
+    if (maxAmt !== null && (r.amount_wan === null || r.amount_wan > maxAmt)) return false;
+    if (minYld !== null) {
+      const y = r.yield_max !== null ? r.yield_max : r.yield_min;
+      if (y === null || y < minYld) return false;
+    }
+    if (maxYld !== null) {
+      const y = r.yield_min !== null ? r.yield_min : r.yield_max;
+      if (y === null || y > maxYld) return false;
+    }
+    if (f.ann_from && (r.announce_date || '') < f.ann_from) return false;
+    if (f.ann_to && (r.announce_date || '') > f.ann_to) return false;
+    if (f.end_from && (!r.end_date_iso || r.end_date_iso < f.end_from)) return false;
+    if (f.end_to && (!r.end_date_iso || r.end_date_iso > f.end_to)) return false;
+    return true;
+  });
+}
+
+function staticSort(list, col, dir) {
+  const mul = dir === 'asc' ? 1 : -1;
+  return list.slice().sort((a, b) => {
+    let va, vb;
+    if (col === 'amount_wan') { va = a.amount_wan ?? -1; vb = b.amount_wan ?? -1; }
+    else if (col === 'yield_max') { va = a.yield_max ?? a.yield_min ?? -1; vb = b.yield_max ?? b.yield_min ?? -1; }
+    else if (col === 'end_date_iso') { va = a.end_date_iso || '9999-12-31'; vb = b.end_date_iso || '9999-12-31'; }
+    else if (col === 'province') { va = (a.province || 'zzz') + '|' + (a.city || 'zzz'); vb = (b.province || 'zzz') + '|' + (b.city || 'zzz'); }
+    else { va = a[col] || ''; vb = b[col] || ''; }
+    if (va < vb) return -1 * mul;
+    if (va > vb) return 1 * mul;
+    return (a.id - b.id);
+  });
+}
+
+function staticOverview() {
+  const recs = state.staticRecords;
+  const todayStr = getBjTodayStr(0);
+  const plus30 = getBjTodayStr(30);
+  let buy=0, redeem=0, active=0, matured=0, flex=0, exp30=0, exp30Amt=0, buyAmt=0;
+  let minD = '9999-99-99', maxD = '';
+  const comps = new Set(), insts = new Set();
+  for (const r of recs) {
+    const isRmb = !r.currency || r.currency === '人民币';
+    if (r.sec_code) comps.add(r.sec_code);
+    if (r.institution_main) insts.add(r.institution_main);
+    if (r.announce_date && r.announce_date < minD) minD = r.announce_date;
+    if (r.announce_date && r.announce_date > maxD) maxD = r.announce_date;
+    if (r.record_type === '本次新购') { buy++; if (isRmb && r.amount_wan) buyAmt += r.amount_wan; }
+    if (r.record_type === '到期赎回') redeem++;
+    if (r.maturity_status === '存续中') active++;
+    if (r.maturity_status === '已到期' || r.maturity_status === '已到期赎回') matured++;
+    if (r.maturity_status === '随时可转让/赎回') flex++;
+    if (r.record_type === '本次新购' && r.maturity_status === '存续中' && r.end_date_iso >= todayStr && r.end_date_iso <= plus30) {
+      exp30++;
+      if (isRmb && r.amount_wan) exp30Amt += r.amount_wan;
+    }
+  }
+  return {
+    records: {
+      total_records: recs.length, buy_records: buy, redeem_records: redeem,
+      active_records: active, matured_records: matured, flexible_records: flex,
+      expiring_30d_count: exp30, expiring_30d_amount_wan: exp30Amt,
+      total_buy_amount_wan: buyAmt, unique_companies: comps.size, unique_institutions: insts.size,
+      min_date: minD === '9999-99-99' ? '' : minD, max_date: maxD,
+    },
+    announcements: (state.staticMeta && state.staticMeta.announcements) || {},
+  };
+}
+
+function staticFilters(f) {
+  const all = state.staticRecords;
+  const prodTypes = Array.from(new Set(all.map(r => r.product_type).filter(Boolean))).sort();
+  const fundSources = Array.from(new Set(all.map(r => r.fund_source).filter(Boolean))).sort();
+
+  const fInst = { ...f }; delete fInst.institution_main;
+  const mInst = staticMatchList(all, fInst);
+  const instMap = new Map();
+  for (const r of mInst) {
+    const k = r.institution_main;
+    if (!k || k === '未披露' || k.includes('%')) continue;
+    instMap.set(k, (instMap.get(k) || 0) + 1);
+  }
+  const top_institutions = Array.from(instMap.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const fProv = { ...f }; delete fProv.province; delete fProv.city;
+  const mProv = staticMatchList(all, fProv);
+  const provMap = new Map();
+  for (const r of mProv) {
+    if (!r.province || r.province === '未知') continue;
+    provMap.set(r.province, (provMap.get(r.province) || 0) + 1);
+  }
+  const provinces = Array.from(provMap.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const fCity = { ...f }; delete fCity.city;
+  const mCity = staticMatchList(all, fCity);
+  const cityMap = new Map();
+  for (const r of mCity) {
+    if (!r.city || r.city === '其他/未注明') continue;
+    const prev = cityMap.get(r.city) || { name: r.city, province: r.province, count: 0 };
+    prev.count++;
+    cityMap.set(r.city, prev);
+  }
+  const cities = Array.from(cityMap.values()).sort((a, b) => b.count - a.count);
+
+  return { product_types: prodTypes, fund_sources: fundSources, provinces, cities, top_institutions };
+}
+
+function staticQueryRecords(f, sortBy, sortDir, page, pageSize) {
+  const matched = staticMatchList(state.staticRecords, f);
+  const sorted = staticSort(matched, sortBy, sortDir);
+  state.lastFilteredStatic = sorted;
+  let amt = 0, ySum = 0, yCnt = 0;
+  const comps = new Set(), insts = new Set();
+  for (const r of sorted) {
+    if ((!r.currency || r.currency === '人民币') && r.amount_wan) amt += r.amount_wan;
+    if (r.sec_code) comps.add(r.sec_code);
+    if (r.institution_main) insts.add(r.institution_main);
+    const y = r.yield_max !== null ? r.yield_max : r.yield_min;
+    if (y !== null) { ySum += y; yCnt++; }
+  }
+  const start = (page - 1) * pageSize;
+  return {
+    total: sorted.length,
+    total_amount_wan: Math.round(amt * 100) / 100,
+    unique_companies: comps.size,
+    unique_institutions: insts.size,
+    avg_yield_max: yCnt ? Math.round((ySum / yCnt) * 100) / 100 : null,
+    items: sorted.slice(start, start + pageSize),
+  };
+}
+
+function staticRankings(recType, instType, limit = 60) {
+  const src = state.staticRecords.filter(r => {
+    if (r.currency && r.currency !== '人民币') return false;
+    if (recType && recType !== '全部' && r.record_type !== recType) return false;
+    if (instType && r.institution_type !== instType) return false;
+    return true;
+  });
+
+  const instMap = new Map(), compMap = new Map(), prodMap = new Map(), brMap = new Map();
+  for (const r of src) {
+    const amt = r.amount_wan || 0;
+    const ymin = r.yield_min !== null ? r.yield_min : r.yield_max;
+    const ymax = r.yield_max !== null ? r.yield_max : r.yield_min;
+
+    if (r.institution_main) {
+      let x = instMap.get(r.institution_main);
+      if (!x) { x = { institution_main: r.institution_main, institution_type: r.institution_type, deal_count: 0, comps: new Set(), total_amount_wan: 0, yMinS: 0, yMinC: 0, yMaxS: 0, yMaxC: 0 }; instMap.set(r.institution_main, x); }
+      x.deal_count++; x.total_amount_wan += amt; x.comps.add(r.sec_code);
+      if (ymin !== null) { x.yMinS += ymin; x.yMinC++; }
+      if (ymax !== null) { x.yMaxS += ymax; x.yMaxC++; }
+    }
+    if (r.sec_code) {
+      let x = compMap.get(r.sec_code);
+      if (!x) { x = { sec_code: r.sec_code, sec_name: r.sec_name, company_name: r.company_name, market: r.market, province: r.province, city: r.city, deal_count: 0, insts: new Set(), total_amount_wan: 0, yMaxS: 0, yMaxC: 0 }; compMap.set(r.sec_code, x); }
+      x.deal_count++; x.total_amount_wan += amt; x.insts.add(r.institution_main);
+      if (ymax !== null) { x.yMaxS += ymax; x.yMaxC++; }
+    }
+    const pt = r.product_type || '其他';
+    {
+      let x = prodMap.get(pt);
+      if (!x) { x = { product_type: pt, deal_count: 0, total_amount_wan: 0, yMinS: 0, yMinC: 0, yMaxS: 0, yMaxC: 0 }; prodMap.set(pt, x); }
+      x.deal_count++; x.total_amount_wan += amt;
+      if (ymin !== null) { x.yMinS += ymin; x.yMinC++; }
+      if (ymax !== null) { x.yMaxS += ymax; x.yMaxC++; }
+    }
+    if (r.branch_name && r.branch_name !== '未披露') {
+      const bk = `${r.institution_main}|${r.branch_name}`;
+      let x = brMap.get(bk);
+      if (!x) { x = { institution_main: r.institution_main, branch_name: r.branch_name, deal_count: 0, comps: new Set(), total_amount_wan: 0 }; brMap.set(bk, x); }
+      x.deal_count++; x.total_amount_wan += amt; x.comps.add(r.sec_code);
+    }
+  }
+
+  return {
+    by_institution: Array.from(instMap.values()).map(x => ({
+      institution_main: x.institution_main, institution_type: x.institution_type, deal_count: x.deal_count,
+      company_count: x.comps.size, total_amount_wan: x.total_amount_wan,
+      avg_yield_min: x.yMinC ? x.yMinS / x.yMinC : null, avg_yield_max: x.yMaxC ? x.yMaxS / x.yMaxC : null,
+    })).sort((a, b) => b.total_amount_wan - a.total_amount_wan).slice(0, limit),
+
+    by_company: Array.from(compMap.values()).map(x => ({
+      sec_code: x.sec_code, sec_name: x.sec_name, company_name: x.company_name, market: x.market,
+      province: x.province, city: x.city, deal_count: x.deal_count, inst_count: x.insts.size,
+      total_amount_wan: x.total_amount_wan, avg_yield_max: x.yMaxC ? x.yMaxS / x.yMaxC : null,
+    })).sort((a, b) => b.total_amount_wan - a.total_amount_wan).slice(0, limit),
+
+    by_product_type: Array.from(prodMap.values()).map(x => ({
+      product_type: x.product_type, deal_count: x.deal_count, total_amount_wan: x.total_amount_wan,
+      avg_yield_min: x.yMinC ? x.yMinS / x.yMinC : null, avg_yield_max: x.yMaxC ? x.yMaxS / x.yMaxC : null,
+    })).sort((a, b) => b.total_amount_wan - a.total_amount_wan),
+
+    by_branch: Array.from(brMap.values()).map(x => ({
+      institution_main: x.institution_main, branch_name: x.branch_name, deal_count: x.deal_count,
+      company_count: x.comps.size, total_amount_wan: x.total_amount_wan,
+    })).sort((a, b) => b.total_amount_wan - a.total_amount_wan).slice(0, limit),
+  };
+}
+
+/* ==================== PURE-JS ZERO-CDN GENUINE XLSX EXPORT (for Static Mode) ==================== */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function xmlEsc(v) {
+  return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function colRef(i) {
+  let s = '', n = i + 1;
+  while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+function buildZipBlob(files) {
+  const enc = new TextEncoder();
+  const localParts = [], centralParts = [];
+  let offset = 0;
+  for (const f of files) {
+    const nameB = enc.encode(f.name);
+    const dataB = enc.encode(f.content);
+    const crc = crc32(dataB);
+    const lh = new ArrayBuffer(30);
+    const lv = new DataView(lh);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true); lv.setUint32(14, crc, true);
+    lv.setUint32(18, dataB.length, true); lv.setUint32(22, dataB.length, true);
+    lv.setUint16(26, nameB.length, true);
+    localParts.push(new Uint8Array(lh), nameB, dataB);
+
+    const ch = new ArrayBuffer(46);
+    const cv = new DataView(ch);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true); cv.setUint32(16, crc, true);
+    cv.setUint32(20, dataB.length, true); cv.setUint32(24, dataB.length, true);
+    cv.setUint16(28, nameB.length, true); cv.setUint32(42, offset, true);
+    centralParts.push(new Uint8Array(ch), nameB);
+    offset += 30 + nameB.length + dataB.length;
+  }
+  const cdSize = centralParts.reduce((s, p) => s + p.length, 0);
+  const eocd = new ArrayBuffer(22);
+  const ev = new DataView(eocd);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true); ev.setUint32(16, offset, true);
+  return new Blob([...localParts, ...centralParts, new Uint8Array(eocd)], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+}
+function downloadFilteredXlsxClient(items) {
+  const cols = [
+    ['上市公司名称','company_name',false], ['股票代码','sec_code',false], ['证券简称','sec_name',false],
+    ['所在省份','province',false], ['所在城市','city',false], ['市场','market',false],
+    ['交易类型','record_type',false], ['当前状态','maturity_status',false],
+    ['机构类型','institution_type',false], ['受托机构(银行/券商)','institution_main',false], ['分支行/营业部','branch_name',false],
+    ['产品名称','product_name',false], ['产品类型','product_type',false],
+    ['金额(万元)','amount_wan',true], ['币种','currency',false],
+    ['收益率区间','yield_rate_raw',false], ['最低收益率(%)','yield_min',true], ['最高收益率(%)','yield_max',true],
+    ['开始日期','start_date',false], ['到期日期','end_date',false], ['实际收益(万元)','actual_income_wan',true],
+    ['资金来源','fund_source',false], ['原公告委托方','entrusting_party',false],
+    ['公告日期','announce_date',false], ['原公告PDF链接','pdf_url',false],
+  ];
+  const rowsXml = [];
+  rowsXml.push('<row r="1">' + cols.map((c, i) => `<c r="${colRef(i)}1" t="inlineStr"><is><t>${xmlEsc(c[0])}</t></is></c>`).join('') + '</row>');
+  items.forEach((it, idx) => {
+    const r = idx + 2;
+    const cells = cols.map((c, i) => {
+      const val = it[c[1]];
+      if (val === null || val === undefined || val === '') return '';
+      if (c[2] && !isNaN(Number(val))) return `<c r="${colRef(i)}${r}"><v>${Number(val)}</v></c>`;
+      return `<c r="${colRef(i)}${r}" t="inlineStr"><is><t>${xmlEsc(val)}</t></is></c>`;
+    }).join('');
+    rowsXml.push(`<row r="${r}">${cells}</row>`);
+  });
+  const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rowsXml.join('')}</sheetData></worksheet>`;
+  const blob = buildZipBlob([
+    { name: '[Content_Types].xml', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
+    { name: '_rels/.rels', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="筛选明细" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+    { name: 'xl/_rels/workbook.xml.rels', content: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>' },
+    { name: 'xl/worksheets/sheet1.xml', content: sheetXml },
+  ]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `A股现金管理_筛选导出_${getBjTodayStr(0).replace(/-/g,'')}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/* ==================== UNIFIED UI CONTROLLER ==================== */
+function getFilterParams() {
+  const f = getFilterObject();
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(f)) p.set(k, v);
+  p.set('sort_by', state.sort_by);
+  p.set('sort_dir', state.sort_dir);
+  return p;
+}
+
+function statusBadge(st) {
+  if (st === '存续中') return '<span class="badge b-active">存续中</span>';
+  if (st === '已到期') return '<span class="badge b-matured">已到期</span>';
+  if (st === '已到期赎回') return '<span class="badge b-redeemed">已到期赎回</span>';
+  if (st === '随时可转让/赎回') return '<span class="badge b-flex">随时可转/赎</span>';
+  return `<span class="badge b-gray">${esc(st || '未知')}</span>`;
+}
+function recTypeBadge(rt) {
+  if (rt === '到期赎回') return '<span class="badge b-red">到期赎回</span>';
+  return '<span class="badge b-buy">本次新购</span>';
+}
+
+function updateMobileFilterBadge() {
+  const f = getFilterObject();
+  delete f.q;
+  const cnt = Object.keys(f).length;
+  const btn = document.getElementById('btnMobFilter');
+  const badge = document.getElementById('mobFilterBadge');
+  if (cnt > 0) {
+    btn.classList.add('has-active');
+    badge.textContent = `(${cnt})`;
+  } else {
+    btn.classList.remove('has-active');
+    badge.textContent = '';
+  }
+}
+
+function toggleMobileFilters() {
+  document.getElementById('advFilters').classList.toggle('open');
+}
+function applyAndCollapseMobile() {
+  if (window.innerWidth <= 768) {
+    document.getElementById('advFilters').classList.remove('open');
+  }
+  searchRecords(1);
+}
+function syncMobileSearch(val) {
+  document.getElementById('f_q').value = val;
+  syncClearBtns();
+}
+function syncDesktopSearch(val) {
+  document.getElementById('f_q_mobile').value = val;
+  syncClearBtns();
+}
+function onMobileSortChange() {
+  const [col, dir] = document.getElementById('mobSortSel').value.split(':');
+  state.sort_by = col;
+  state.sort_dir = dir;
+  searchRecords(1);
+}
+
+async function loadOverview() {
+  const res = IS_STATIC ? staticOverview() : await fetch('/api/overview').then(r => r.json());
+  const r = res.records || {};
+  const a = res.announcements || {};
+  document.getElementById('kpiTotal').textContent = fmtInt(r.total_records);
+  document.getElementById('kpiTotalSub').textContent = `${fmtInt(r.unique_companies)} 家公司 · ${fmtInt(r.unique_institutions)} 家机构`;
+  document.getElementById('kpiActive').textContent = fmtInt(r.active_records);
+  document.getElementById('kpiActiveSub').textContent = `随时可转/赎 ${fmtInt(r.flexible_records)} 笔`;
+  document.getElementById('kpiMatured').textContent = fmtInt(r.matured_records);
+  document.getElementById('kpiMaturedSub').textContent = `赎回 ${fmtInt(r.redeem_records)} 笔 · 新购 ${fmtNum((r.total_buy_amount_wan||0)/10000, 1)} 亿`;
+  document.getElementById('kpiExp30').textContent = fmtInt(r.expiring_30d_count);
+  document.getElementById('kpiExp30Sub').textContent = `30天到期 ${fmtNum((r.expiring_30d_amount_wan||0)/10000, 2)} 亿元`;
+  const revCount = (a.needs_review_announcements || 0) + (a.error_announcements || 0);
+  document.getElementById('kpiReview').textContent = fmtInt(revCount);
+  document.getElementById('kpiReviewSub').textContent = `已扫描 ${fmtInt(a.total_announcements)} 份 · 成功解析 ${fmtInt(a.parsed_announcements)} 份`;
+  document.getElementById('badgeRecords').textContent = fmtInt(r.total_records);
+  document.getElementById('badgeReview').textContent = fmtInt(revCount);
+  if (r.min_date && r.max_date) {
+    document.getElementById('subtitleText').textContent =
+      `数据区间：${r.min_date} ~ ${r.max_date} · 沪深北全A股 · 新购与到期赎回合一总表`;
+  }
+}
+
+async function loadFilterOptions(initSelects = true) {
+  let data;
+  if (IS_STATIC) {
+    data = staticFilters(getFilterObject());
+  } else {
+    const p = getFilterParams();
+    p.delete('sort_by');
+    p.delete('sort_dir');
+    data = await fetch('/api/filters?' + p.toString()).then(r => r.json());
+  }
+  if (initSelects) {
+    const prodSel = document.getElementById('f_prod_type');
+    const curProd = prodSel.value;
+    prodSel.innerHTML = '<option value="">全部产品</option>' +
+      (data.product_types || []).map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    prodSel.value = curProd;
+
+    const fundSel = document.getElementById('f_fund');
+    const curFund = fundSel.value;
+    fundSel.innerHTML = '<option value="">募集 + 自有资金</option>' +
+      (data.fund_sources || []).map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    fundSel.value = curFund;
+  }
+
+  const provSel = document.getElementById('f_province');
+  const curProv = provSel.value;
+  const provs = data.provinces || [];
+  provSel.innerHTML = '<option value="">全部省份</option>' +
+    provs.map(x => `<option value="${esc(x.name)}">${esc(x.name)} (${x.count}笔)</option>`).join('');
+  if (curProv && !provs.some(x => x.name === curProv)) {
+    provSel.innerHTML += `<option value="${esc(curProv)}">${esc(curProv)} (0笔)</option>`;
+  }
+  provSel.value = curProv;
+
+  const citySel = document.getElementById('f_city');
+  const curCity = citySel.value;
+  const cities = data.cities || [];
+  citySel.innerHTML = '<option value="">全部城市</option>' +
+    cities.map(x => {
+      const label = curProv ? `${x.name} (${x.count}笔)` : `${x.name} · ${x.province} (${x.count}笔)`;
+      return `<option value="${esc(x.name)}">${esc(label)}</option>`;
+    }).join('');
+  if (curCity && !cities.some(x => x.name === curCity)) {
+    citySel.innerHTML += `<option value="${esc(curCity)}">${esc(curCity)} (0笔)</option>`;
+  }
+  citySel.value = curCity;
+
+  state.allInstitutions = data.top_institutions || [];
+  renderInstCombo('');
+}
+
+function onProvinceChange() {
+  document.getElementById('f_city').value = '';
+  searchRecords(1);
+}
+
+function syncClearBtns() {
+  const show = (id, btnId) => {
+    const el = document.getElementById(id);
+    const btn = document.getElementById(btnId);
+    if (el && btn) btn.style.display = (el.value || '').trim() ? 'block' : 'none';
+  };
+  show('f_q', 'clr_q');
+  show('f_q_mobile', 'clr_q_m');
+  show('f_inst_main', 'clr_inst');
+  show('f_branch', 'clr_branch');
+}
+
+function clearField(id) {
+  document.getElementById(id).value = '';
+  if (id === 'f_q') document.getElementById('f_q_mobile').value = '';
+  syncClearBtns();
+  searchRecords(1);
+}
+
+function renderInstCombo(keyword = '') {
+  const menu = document.getElementById('instComboMenu');
+  const current = (document.getElementById('f_inst_main').value || '').trim();
+  const kw = keyword.trim().toLowerCase();
+  const list = (state.allInstitutions || []).filter(x => !kw || x.name.toLowerCase().includes(kw));
+  let html = `<div class="combo-item reset-opt ${!current ? 'selected' : ''}" onmousedown="event.preventDefault();selectInstOption('')"><span>全部主机构（不限）</span><span class="cnt">清除筛选</span></div>`;
+  if (!list.length) {
+    html += `<div class="combo-item" style="color:var(--muted);cursor:default;">未找到匹配机构</div>`;
+  } else {
+    html += list.map(x =>
+      `<div class="combo-item ${current === x.name ? 'selected' : ''}" onmousedown="event.preventDefault();selectInstOption('${esc(x.name)}')"><span>${esc(x.name)}</span><span class="cnt">${x.count} 笔</span></div>`
+    ).join('');
+  }
+  menu.innerHTML = html;
+}
+function openInstCombo(showAll = true) {
+  const kw = showAll ? '' : (document.getElementById('f_inst_main').value || '');
+  renderInstCombo(kw);
+  document.getElementById('instComboMenu').classList.add('show');
+}
+function closeInstCombo() { document.getElementById('instComboMenu').classList.remove('show'); }
+function toggleInstCombo() {
+  const menu = document.getElementById('instComboMenu');
+  if (menu.classList.contains('show')) closeInstCombo();
+  else { document.getElementById('f_inst_main').focus(); openInstCombo(true); }
+}
+function onInstInput() { syncClearBtns(); openInstCombo(false); }
+function selectInstOption(name) {
+  document.getElementById('f_inst_main').value = name;
+  syncClearBtns();
+  closeInstCombo();
+  searchRecords(1);
+}
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('instComboWrap');
+  if (wrap && !wrap.contains(e.target)) closeInstCombo();
+});
+
+async function searchRecords(page = 1) {
+  state.page = page;
+  updateMobileFilterBadge();
+  const pageSize = Number(document.getElementById('pageSizeSel').value || 50);
+
+  let data;
+  if (IS_STATIC) {
+    const f = getFilterObject();
+    data = staticQueryRecords(f, state.sort_by, state.sort_dir, page, pageSize);
+    if (page === 1) await loadFilterOptions(false);
+  } else {
+    const p = getFilterParams();
+    p.set('page', page);
+    p.set('page_size', pageSize);
+    document.getElementById('recordsTbody').innerHTML = '<tr><td colspan="14" class="empty">查询中...</td></tr>';
+    const reqs = [fetch('/api/records?' + p.toString()).then(r => r.json())];
+    if (page === 1) reqs.push(loadFilterOptions(false));
+    [data] = await Promise.all(reqs);
+  }
+
+  state.total = data.total || 0;
+  document.getElementById('sumCount').textContent = fmtInt(data.total);
+  document.getElementById('sumAmt').textContent = fmtNum(data.total_amount_wan, 2);
+  document.getElementById('sumAmtYi').textContent = fmtNum((data.total_amount_wan || 0) / 10000, 2);
+  document.getElementById('sumComp').textContent = fmtInt(data.unique_companies);
+  document.getElementById('sumInst').textContent = fmtInt(data.unique_institutions);
+  document.getElementById('sumYld').textContent = data.avg_yield_max !== null ? data.avg_yield_max.toFixed(2) + '%' : '-';
+
+  const items = data.items || [];
+  const tbody = document.getElementById('recordsTbody');
+  const cardList = document.getElementById('mobileCardList');
+
+  if (!items.length) {
+    tbody.innerHTML = '<tr><td colspan="14" class="empty">没有符合筛选条件的记录，请调整筛选条件或点击“重置条件”</td></tr>';
+    cardList.innerHTML = '<div class="empty">没有符合筛选条件的记录，点击“重置条件”查看全部</div>';
+  } else {
+    tbody.innerHTML = items.map(it => {
+      const subComp = it.entrusting_party && it.entrusting_party !== it.company_name
+        ? `<span class="sub-meta">${esc(it.sec_code)} ${esc(it.sec_name)} · 委托方:${esc(it.entrusting_party)}</span>`
+        : `<span class="sub-meta">${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>`;
+      const prov = it.province || '';
+      const city = (it.city && it.city !== '其他/未注明') ? it.city : '';
+      const isMuni = prov && city && city.startsWith(prov);
+      const regionCell = prov
+        ? (isMuni
+            ? `<span class="click-link" onclick="quickFilterRegion('${esc(prov)}','')">${esc(city)}</span>`
+            : `<span class="click-link" onclick="quickFilterRegion('${esc(prov)}','')">${esc(prov)}</span>${city ? `<span class="sub-meta click-link" style="font-weight:400;" onclick="quickFilterRegion('${esc(prov)}','${esc(city)}')">${esc(city)}</span>` : ''}`)
+        : '<span style="color:#94a3b8;">-</span>';
+      const amtDisp = it.amount_wan !== null
+        ? `<strong>${fmtNum(it.amount_wan, 2)}</strong>${it.currency && it.currency !== '人民币' ? `<span class="sub-meta">${esc(it.currency)}</span>` : ''}`
+        : '-';
+      const branchDisp = (it.branch_name && it.branch_name !== '未披露')
+        ? `<span style="color:#0f172a;font-weight:500;">${esc(it.branch_name)}</span>`
+        : `<span style="color:#94a3b8;">未披露</span>`;
+      const incDisp = it.actual_income_wan !== null ? fmtNum(it.actual_income_wan, 2) : '<span style="color:#cbd5e1;">-</span>';
+      return `<tr>
+        <td>
+          <span class="click-link" title="${esc(it.company_name)}" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</span>
+          ${subComp}
+        </td>
+        <td class="ctr nowrap">${regionCell}</td>
+        <td class="ctr">${recTypeBadge(it.record_type)}</td>
+        <td class="ctr">${statusBadge(it.maturity_status)}</td>
+        <td>
+          <span class="click-link" onclick="quickFilterInst('${esc(it.institution_main)}')">${esc(it.institution_main || '-')}</span>
+          <span class="sub-meta">${esc(it.institution_type || '')}</span>
+        </td>
+        <td>${branchDisp}</td>
+        <td>
+          <span class="ellipsis" title="${esc(it.product_name)}">${esc(it.product_name || '-')}</span>
+          <span class="sub-meta">${esc(it.product_type || '')}${it.product_type_raw && it.product_type_raw !== it.product_type ? ' · ' + esc(it.product_type_raw) : ''}</span>
+        </td>
+        <td class="num">${amtDisp}</td>
+        <td class="ctr"><strong>${esc(it.yield_rate_raw || '-')}</strong></td>
+        <td class="ctr nowrap">${esc(it.start_date || '-')}</td>
+        <td class="ctr nowrap">${esc(it.end_date || '-')}</td>
+        <td class="num">${incDisp}</td>
+        <td class="ctr"><span class="badge b-gray">${esc(it.fund_source || '未注明')}</span></td>
+        <td class="ctr nowrap">
+          <div>${esc(it.announce_date)}</div>
+          <a href="${esc(it.pdf_url)}" target="_blank" rel="noopener" style="font-size:11.5px;">查看PDF ↗</a>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // Render Native-Feeling Mobile Cards
+    cardList.innerHTML = items.map(it => {
+      const prov = it.province || '';
+      const city = (it.city && it.city !== '其他/未注明') ? it.city : '';
+      const regionText = prov ? (city && !city.startsWith(prov) ? `${prov}·${city}` : (city || prov)) : '';
+      const brText = (it.branch_name && it.branch_name !== '未披露') ? it.branch_name : '未披露';
+      const dateSpan = `${it.start_date || '-'} → ${it.end_date || '-'}`;
+      const incHtml = it.actual_income_wan !== null
+        ? `<div class="m-kv-full"><span class="m-k">实际获得收益</span><span class="m-v" style="color:#059669;">${fmtNum(it.actual_income_wan, 2)} 万元</span></div>`
+        : '';
+      return `<div class="m-card">
+        <div class="m-card-head">
+          <div style="min-width:0;">
+            <div class="m-comp-name" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</div>
+            <div class="m-comp-sub">
+              <span>${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>
+              ${regionText ? `<span class="m-region-chip" onclick="quickFilterRegion('${esc(prov)}','${esc(city)}')">${esc(regionText)}</span>` : ''}
+            </div>
+          </div>
+          <div class="m-badges">
+            ${statusBadge(it.maturity_status)}
+            ${recTypeBadge(it.record_type)}
+          </div>
+        </div>
+        <div class="m-hero">
+          <div class="m-amt">${it.amount_wan !== null ? fmtNum(it.amount_wan, 2) : '-'}<small>万${it.currency && it.currency !== '人民币' ? esc(it.currency) : '元'}</small></div>
+          <div class="m-yield">收益 ${esc(it.yield_rate_raw || '-')}</div>
+        </div>
+        <div class="m-grid">
+          <div><span class="m-k">受托机构（${esc(it.institution_type || '机构')}）</span><span class="m-v" style="color:var(--primary);" onclick="quickFilterInst('${esc(it.institution_main)}')">${esc(it.institution_main || '-')}</span></div>
+          <div><span class="m-k">分支行 / 营业部</span><span class="m-v">${esc(brText)}</span></div>
+          <div class="m-kv-full"><span class="m-k">产品名称（${esc(it.product_type || '理财')}）</span><span class="m-v">${esc(it.product_name || '-')}</span></div>
+          <div class="m-kv-full"><span class="m-k">起息日 → 到期日</span><span class="m-v">${esc(dateSpan)}</span></div>
+          ${incHtml}
+        </div>
+        <div class="m-foot">
+          <div><span class="badge b-gray" style="margin-right:6px;">${esc(it.fund_source || '未注明')}</span><span>公告 ${esc(it.announce_date)}</span></div>
+          <a class="m-pdf-btn" href="${esc(it.pdf_url)}" target="_blank" rel="noopener">查看PDF ↗</a>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  const totalPages = Math.max(1, Math.ceil(state.total / pageSize));
+  const startRow = state.total ? (page - 1) * pageSize + 1 : 0;
+  const endRow = Math.min(state.total, page * pageSize);
+  document.getElementById('pagerInfo').textContent = `显示第 ${startRow} - ${endRow} 条，共 ${fmtInt(state.total)} 条`;
+  document.getElementById('pageNumLabel').textContent = `${page} / ${totalPages}`;
+  document.getElementById('btnPrev').disabled = page <= 1;
+  document.getElementById('btnNext').disabled = page >= totalPages;
+}
+
+function goPage(delta) {
+  const pageSize = Number(document.getElementById('pageSizeSel').value || 50);
+  const totalPages = Math.max(1, Math.ceil(state.total / pageSize));
+  const nxt = Math.max(1, Math.min(totalPages, state.page + delta));
+  if (nxt !== state.page) {
+    searchRecords(nxt);
+    if (window.innerWidth <= 768) window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
+function toggleSort(col) {
+  if (state.sort_by === col) state.sort_dir = state.sort_dir === 'desc' ? 'asc' : 'desc';
+  else { state.sort_by = col; state.sort_dir = (col === 'end_date_iso' || col === 'province') ? 'asc' : 'desc'; }
+  document.querySelectorAll('[id^="sort_"]').forEach(el => el.textContent = '');
+  const el = document.getElementById('sort_' + col);
+  if (el) el.textContent = state.sort_dir === 'desc' ? '▼' : '▲';
+  searchRecords(1);
+}
+
+function resetFilters(runSearch = true) {
+  ['f_q','f_q_mobile','f_province','f_city','f_inst_type','f_inst_main','f_branch','f_prod_type','f_rec_type','f_status','f_fund','f_market','f_min_amt','f_max_amt','f_min_yld','f_max_yld','f_ann_from','f_ann_to','f_end_from','f_end_to'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  document.querySelector('.pill[data-quick="all"]').classList.add('active');
+  syncClearBtns();
+  updateMobileFilterBadge();
+  if (runSearch) searchRecords(1);
+}
+
+function setQuickPreset(key) {
+  resetFilters(false);
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  const el = document.querySelector(`.pill[data-quick="${key}"]`);
+  if (el) el.classList.add('active');
+  if (key === 'active') document.getElementById('f_status').value = '存续中';
+  else if (key === 'matured') document.getElementById('f_status').value = '已到期合集';
+  else if (key === 'exp30') {
+    document.getElementById('f_status').value = '即将30天到期';
+    state.sort_by = 'end_date_iso'; state.sort_dir = 'asc';
+  } else if (key === 'buy') document.getElementById('f_rec_type').value = '本次新购';
+  else if (key === 'redeem') document.getElementById('f_rec_type').value = '到期赎回';
+  else if (key === 'flex') document.getElementById('f_status').value = '随时可转让/赎回';
+  else if (key === 'branch') document.getElementById('f_branch').value = '__HAS_BRANCH__';
+  searchRecords(1);
+}
+
+function applyQuickStatus(st) {
+  switchTab('records');
+  resetFilters(false);
+  if (st) {
+    document.getElementById('f_status').value = st;
+    if (st === '即将30天到期') { state.sort_by = 'end_date_iso'; state.sort_dir = 'asc'; }
+  }
+  searchRecords(1);
+}
+function quickFilterCompany(name) {
+  switchTab('records');
+  resetFilters(false);
+  document.getElementById('f_q').value = name;
+  document.getElementById('f_q_mobile').value = name;
+  syncClearBtns();
+  searchRecords(1);
+}
+function quickFilterInst(name, branch='') {
+  switchTab('records');
+  resetFilters(false);
+  document.getElementById('f_inst_main').value = name;
+  if (branch) document.getElementById('f_branch').value = branch;
+  syncClearBtns();
+  searchRecords(1);
+}
+function quickFilterRegion(prov, city='') {
+  switchTab('records');
+  resetFilters(false);
+  const pSel = document.getElementById('f_province');
+  if (prov && !Array.from(pSel.options).some(o => o.value === prov)) pSel.add(new Option(prov, prov));
+  pSel.value = prov || '';
+  const cSel = document.getElementById('f_city');
+  if (city && !Array.from(cSel.options).some(o => o.value === city)) cSel.add(new Option(city, city));
+  cSel.value = city || '';
+  syncClearBtns();
+  searchRecords(1);
+}
+
+function switchTab(tab) {
+  state.tab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  ['records','rankings','companies','review'].forEach(k => {
+    document.getElementById('view-' + k).classList.toggle('hidden', k !== tab);
+  });
+  if (tab === 'rankings') loadRankings();
+  else if (tab === 'companies') loadCompanyRankings();
+  else if (tab === 'review') loadReview(1);
+}
+
+async function loadRankings() {
+  const rt = document.getElementById('rk_rec_type').value;
+  const it = document.getElementById('rk_inst_type').value;
+  const data = IS_STATIC
+    ? staticRankings(rt, it, 60)
+    : await fetch(`/api/rankings?record_type=${encodeURIComponent(rt)}&institution_type=${encodeURIComponent(it)}&limit=60`).then(r => r.json());
+
+  const insts = data.by_institution || [];
+  const maxAmt = insts.length ? (insts[0].total_amount_wan || 1) : 1;
+  document.getElementById('rankInstTbody').innerHTML = insts.length ? insts.map((x, i) => `
+    <tr>
+      <td class="ctr"><strong>${i+1}</strong></td>
+      <td>
+        <span class="click-link" onclick="quickFilterInst('${esc(x.institution_main)}')">${esc(x.institution_main)}</span>
+        <div class="bar-bg"><div class="bar-fg" style="width:${Math.max(2, Math.round((x.total_amount_wan/maxAmt)*100))}%"></div></div>
+      </td>
+      <td class="ctr"><span class="badge b-gray">${esc(x.institution_type)}</span></td>
+      <td class="num"><strong>${fmtNum(x.total_amount_wan, 0)}</strong><span class="sub-meta">${fmtNum(x.total_amount_wan/10000, 2)} 亿</span></td>
+      <td class="num">${fmtInt(x.deal_count)}</td>
+      <td class="num">${fmtInt(x.company_count)}</td>
+      <td class="num">${x.avg_yield_max !== null ? (x.avg_yield_min !== null && Math.abs(x.avg_yield_min - x.avg_yield_max) > 0.01 ? x.avg_yield_min.toFixed(2)+'%-'+x.avg_yield_max.toFixed(2)+'%' : x.avg_yield_max.toFixed(2)+'%') : '-'}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="7" class="empty">暂无数据</td></tr>';
+
+  const prods = data.by_product_type || [];
+  document.getElementById('rankProdTbody').innerHTML = prods.map(x => `
+    <tr>
+      <td><strong>${esc(x.product_type)}</strong></td>
+      <td class="num">${fmtNum(x.total_amount_wan, 0)}</td>
+      <td class="num">${fmtInt(x.deal_count)}</td>
+      <td class="num">${x.avg_yield_min !== null ? x.avg_yield_min.toFixed(2)+'%' : '-'}</td>
+      <td class="num">${x.avg_yield_max !== null ? x.avg_yield_max.toFixed(2)+'%' : '-'}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="5" class="empty">暂无数据</td></tr>';
+
+  const brs = data.by_branch || [];
+  document.getElementById('rankBranchTbody').innerHTML = brs.map(x => `
+    <tr>
+      <td>
+        <span class="click-link" onclick="quickFilterInst('${esc(x.institution_main)}','${esc(x.branch_name)}')">${esc(x.branch_name)}</span>
+        <span class="sub-meta">${esc(x.institution_main)}</span>
+      </td>
+      <td class="num"><strong>${fmtNum(x.total_amount_wan, 0)}</strong></td>
+      <td class="num">${fmtInt(x.deal_count)}</td>
+      <td class="num">${fmtInt(x.company_count)}</td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="empty">暂无已披露分行数据</td></tr>';
+}
+
+async function loadCompanyRankings() {
+  const rt = document.getElementById('comp_rec_type').value;
+  const data = IS_STATIC
+    ? staticRankings(rt, '', 100)
+    : await fetch(`/api/rankings?record_type=${encodeURIComponent(rt)}&limit=100`).then(r => r.json());
+  const comps = data.by_company || [];
+  document.getElementById('rankCompTbody').innerHTML = comps.length ? comps.map((x, i) => `
+    <tr>
+      <td class="ctr"><strong>${i+1}</strong></td>
+      <td><span class="click-link" onclick="quickFilterCompany('${esc(x.sec_name)}')">${esc(x.company_name)}</span> <span style="color:var(--muted);font-size:11.5px;">(${esc(x.sec_name)})</span></td>
+      <td class="ctr">${esc(x.sec_code)}</td>
+      <td class="ctr nowrap">${esc(x.province ? (x.city && x.city !== '其他/未注明' && !x.city.startsWith(x.province) ? x.province + '·' + x.city : (x.city || x.province)) : '-')}</td>
+      <td class="ctr"><span class="badge b-gray">${esc(x.market)}</span></td>
+      <td class="num"><strong>${fmtNum(x.total_amount_wan, 2)}</strong></td>
+      <td class="num">${fmtNum(x.total_amount_wan/10000, 2)}</td>
+      <td class="num">${fmtInt(x.deal_count)}</td>
+      <td class="num">${fmtInt(x.inst_count)}</td>
+      <td class="num">${x.avg_yield_max !== null ? x.avg_yield_max.toFixed(2)+'%' : '-'}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="10" class="empty">暂无数据</td></tr>';
+}
+
+async function loadReview(page = 1) {
+  state.revPage = page;
+  let data;
+  if (IS_STATIC) {
+    const all = (state.staticMeta && state.staticMeta.review_items) || [];
+    const s = (page - 1) * 50;
+    data = { total: all.length, items: all.slice(s, s + 50) };
+  } else {
+    data = await fetch(`/api/review?page=${page}&page_size=50`).then(r => r.json());
+  }
+  state.revTotal = data.total || 0;
+  const items = data.items || [];
+  document.getElementById('reviewTbody').innerHTML = items.length ? items.map(x => `
+    <tr>
+      <td class="ctr nowrap">${esc(x.announce_date)}</td>
+      <td><strong>${esc(x.company_name || x.sec_name)}</strong><span class="sub-meta">${esc(x.sec_code)} ${esc(x.sec_name)}</span></td>
+      <td class="ctr">${esc(x.market)}</td>
+      <td>${esc(x.title)}</td>
+      <td class="ctr"><span class="badge b-redeemed">${esc(x.parse_status)}</span></td>
+      <td style="color:var(--muted);">${esc(x.parse_note)}</td>
+      <td class="ctr nowrap"><a href="${esc(x.pdf_url)}" target="_blank" rel="noopener">打开原文 ↗</a></td>
+    </tr>
+  `).join('') : '<tr><td colspan="7" class="empty">当前没有待复核的公告！</td></tr>';
+
+  const totalPages = Math.max(1, Math.ceil(state.revTotal / 50));
+  document.getElementById('revPagerInfo').textContent = `共 ${fmtInt(state.revTotal)} 份待复核公告`;
+  document.getElementById('revPageLabel').textContent = `${page} / ${totalPages}`;
+  document.getElementById('btnRevPrev').disabled = page <= 1;
+  document.getElementById('btnRevNext').disabled = page >= totalPages;
+}
+function goRevPage(d) {
+  const tp = Math.max(1, Math.ceil(state.revTotal / 50));
+  const nxt = Math.max(1, Math.min(tp, state.revPage + d));
+  if (nxt !== state.revPage) loadReview(nxt);
+}
+
+function exportExcel(full = false) {
+  if (IS_STATIC) {
+    if (full || Object.keys(getFilterObject()).length === 0) {
+      window.location.href = `./data/A股现金管理汇总.xlsx?v=${DATA_VER}`;
+    } else {
+      downloadFilteredXlsxClient(state.lastFilteredStatic || []);
+    }
+    return;
+  }
+  const p = full ? new URLSearchParams({ full: 'true' }) : getFilterParams();
+  window.location.href = '/api/export?' + p.toString();
+}
+
+function openSyncModal() { document.getElementById('syncModal').classList.add('show'); }
+function closeSyncModal() { document.getElementById('syncModal').classList.remove('show'); }
+
+async function startSync() {
+  const payload = {
+    date_from: document.getElementById('sync_from').value || null,
+    date_to: document.getElementById('sync_to').value || null,
+    incremental: document.getElementById('sync_inc').checked,
+  };
+  closeSyncModal();
+  await fetch('/api/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  pollSyncStatus();
+}
+
+async function pollSyncStatus() {
+  if (IS_STATIC) return;
+  const s = await fetch('/api/sync/status').then(r => r.json());
+  const bar = document.getElementById('syncBar');
+  const btn = document.getElementById('btnOpenSync');
+  if (s.running) {
+    bar.classList.add('show');
+    btn.disabled = true;
+    document.getElementById('syncPhase').textContent = s.phase === 'listing' ? '检索目录' : s.phase === 'reconciling' ? '核对到期' : '解析PDF';
+    document.getElementById('syncMsg').textContent = s.message || '处理中...';
+    const pct = s.to_process > 0 ? Math.min(100, Math.round((s.processed / s.to_process) * 100)) : 5;
+    document.getElementById('syncFill').style.width = pct + '%';
+    document.getElementById('syncPct').textContent = pct + '%';
+    if (!state.syncTimer) state.syncTimer = setInterval(pollSyncStatus, 2000);
+  } else {
+    btn.disabled = false;
+    if (state.syncTimer) {
+      clearInterval(state.syncTimer);
+      state.syncTimer = null;
+      document.getElementById('syncPhase').textContent = s.phase === 'error' ? '异常' : '同步完成';
+      document.getElementById('syncMsg').textContent = s.message || '';
+      document.getElementById('syncFill').style.width = '100%';
+      document.getElementById('syncPct').textContent = '100%';
+      bar.classList.add('show');
+      await Promise.all([loadOverview(), loadFilterOptions(), searchRecords(1)]);
+    }
+  }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  if (IS_STATIC) await initStaticData();
+  await Promise.all([loadOverview(), loadFilterOptions(true)]);
+  await searchRecords(1);
+  if (!IS_STATIC) pollSyncStatus();
+});
+</script>
+</body>
+</html>

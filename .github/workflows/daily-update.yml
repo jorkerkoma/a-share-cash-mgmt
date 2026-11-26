@@ -1,0 +1,78 @@
+name: 每日自动同步A股现金管理公告并构建静态站点
+
+on:
+  schedule:
+    # 每天北京时间 21:30（晚间公告集中披露完毕）和 次日 08:30（补抓早间公告）自动更新
+    - cron: '30 13 * * *'
+    - cron: '30 0 * * *'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '回溯抓取天数（日常增量填 5，补抓全量近3个月填 92）'
+        required: false
+        default: '5'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "daily-cash-mgmt-sync"
+  cancel-in-progress: false
+
+jobs:
+  sync-and-build:
+    runs-on: ubuntu-latest
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - name: 拉取仓库代码与历史数据库
+        uses: actions/checkout@v4
+
+      - name: 配置 Python 环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 在线增量同步最新公告（PDF内存解析不落盘）
+        run: |
+          DAYS="${{ github.event.inputs.days || '5' }}"
+          python run_sync.py --days "$DAYS" --workers 6 --no-excel
+
+      - name: 打包生成纯静态云端站点与全量Excel（dist/）
+        run: python build_static.py
+
+      - name: 提交更新后的数据库与静态文件（触发 EdgeOne / Cloudflare 自动发布）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/cash_mgmt.db dist/
+          if git diff --cached --quiet; then
+            echo "今日暂无新增变化，跳过提交。"
+          else
+            git commit -m "chore: 自动更新现金管理数据 ($(date +'%Y-%m-%d %H:%M'))"
+            git push
+          fi
+
+      - name: 上传静态站点产物（供 GitHub Pages 备用托管）
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy-github-pages:
+    needs: sync-and-build
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 部署到 GitHub Pages（备用入口，失败不影响主仓库提交）
+        id: deployment
+        continue-on-error: true
+        uses: actions/deploy-pages@v4
