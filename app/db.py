@@ -318,6 +318,19 @@ def build_where_clause(filters: Dict[str, Any]) -> Tuple[str, List[Any]]:
             clauses.append(f"{col} = ?")
             params.append(val)
 
+    sec_codes_raw = (filters.get("sec_codes") or "").strip()
+    if sec_codes_raw:
+        if sec_codes_raw == "__NONE__":
+            clauses.append("1 = 0")
+        else:
+            codes = [c.strip() for c in sec_codes_raw.split(",") if c.strip()]
+            if codes:
+                placeholders = ",".join(["?"] * len(codes))
+                clauses.append(f"sec_code IN ({placeholders})")
+                params.extend(codes)
+            else:
+                clauses.append("1 = 0")
+
     branch = (filters.get("branch_name") or "").strip()
     if branch:
         if branch == "__HAS_BRANCH__":

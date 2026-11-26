@@ -154,6 +154,42 @@
   .pill:hover { border-color: var(--primary); color: var(--primary); }
   .pill.active { background: var(--navy); color: #fff; border-color: var(--navy); }
   .pill-warn.active { background: #b45309; border-color: #b45309; }
+  .pill-follow {
+    border-color: #fda4af; color: #be123c; background: #fff1f2;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .pill-follow:hover { border-color: #e11d48; color: #e11d48; background: #ffe4e6; }
+  .pill-follow.active { background: #e11d48; color: #fff; border-color: #e11d48; }
+  .follow-cnt {
+    display: inline-block; min-width: 17px; padding: 0 5px; border-radius: 99px;
+    font-size: 11px; line-height: 16px; text-align: center; font-weight: 700;
+    background: rgba(225, 29, 72, .14); color: #be123c;
+  }
+  .pill-follow.active .follow-cnt { background: rgba(255, 255, 255, .24); color: #fff; }
+
+  /* Company Watchlist Heart Button */
+  .comp-cell-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+  .comp-cell-main { min-width: 0; flex: 1; }
+  .heart-btn {
+    flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; border: none;
+    background: transparent; cursor: pointer; display: inline-flex; align-items: center;
+    justify-content: center; color: #94a3b8; transition: all .15s; padding: 0;
+  }
+  .heart-btn:hover { background: #fff1f2; color: #e11d48; transform: scale(1.12); }
+  .heart-btn.active { color: #e11d48; }
+  .heart-btn svg { width: 15px; height: 15px; display: block; }
+  .heart-btn .heart-path { fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; transition: fill .15s; }
+  .heart-btn.active .heart-path { fill: #e11d48; stroke: #e11d48; }
+  .m-comp-title-row { display: flex; align-items: center; gap: 4px; }
+  .m-comp-title-row .m-comp-name { flex: 1; min-width: 0; }
+  .toast-tip {
+    position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(16px);
+    background: rgba(15, 23, 42, .9); color: #fff; padding: 8px 16px; border-radius: 99px;
+    font-size: 12.5px; font-weight: 600; z-index: 90; pointer-events: none;
+    opacity: 0; transition: all .2s ease; box-shadow: 0 8px 24px rgba(15,23,42,.22);
+    white-space: nowrap;
+  }
+  .toast-tip.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   /* Mobile filter toggle bar (hidden on PC) */
   .mobile-search-bar { display: none; gap: 8px; margin-bottom: 10px; align-items: center; }
@@ -502,6 +538,7 @@
     <div class="panel">
       <div class="quick-pills">
         <span style="font-size:12px;color:var(--muted);font-weight:600;">快捷视图：</span>
+        <button class="pill pill-follow" data-quick="followed" id="pillFollowed" onclick="setQuickPreset('followed')">♥ 已关注上市公司 <span class="follow-cnt" id="followedCountBadge">0</span></button>
         <button class="pill active" data-quick="all" onclick="setQuickPreset('all')">全部明细</button>
         <button class="pill" data-quick="active" onclick="setQuickPreset('active')">存续中</button>
         <button class="pill" data-quick="matured" onclick="setQuickPreset('matured')">已到期(含赎回)</button>
@@ -913,9 +950,29 @@
   </div>
 </div>
 
+<div id="toastTip" class="toast-tip"></div>
+
 <script>
 const IS_STATIC = Boolean(window.__STATIC_MODE__);
 const DATA_VER = IS_STATIC ? String(Math.floor(Date.now() / 300000)) : (window.__DATA_VER__ || String(Date.now()));
+
+const FOLLOW_STORAGE_KEY = 'ashare_followed_companies_v1';
+const HEART_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path class="heart-path" d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>';
+
+function loadFollowedCodes() {
+  try {
+    const raw = localStorage.getItem(FOLLOW_STORAGE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr.filter(x => typeof x === 'string' && x.trim()) : []);
+  } catch (e) {
+    return new Set();
+  }
+}
+function saveFollowedCodes() {
+  try {
+    localStorage.setItem(FOLLOW_STORAGE_KEY, JSON.stringify(Array.from(state.followedCodes)));
+  } catch (e) {}
+}
 
 const state = {
   tab: 'records',
@@ -925,6 +982,9 @@ const state = {
   loadingMore: false,
   hasMore: false,
   querySeq: 0,
+  followedOnly: false,
+  followedCodes: loadFollowedCodes(),
+  toastTimer: null,
   sort_by: 'announce_date',
   sort_dir: 'desc',
   revPage: 1,
@@ -1023,10 +1083,16 @@ function getFilterObject() {
     const v = el ? (el.value || '').trim() : '';
     if (v) f[k] = v;
   }
+  if (state.followedOnly) {
+    const codes = Array.from(state.followedCodes);
+    f.sec_codes = codes.length ? codes.join(',') : '__NONE__';
+  }
   return f;
 }
 
 function staticMatchList(records, f) {
+  if (f.sec_codes === '__NONE__') return [];
+  const secCodeSet = f.sec_codes ? new Set(f.sec_codes.split(',').filter(Boolean)) : null;
   const q = (f.q || '').toLowerCase();
   const minAmt = f.min_amount !== undefined ? Number(f.min_amount) : null;
   const maxAmt = f.max_amount !== undefined ? Number(f.max_amount) : null;
@@ -1038,6 +1104,7 @@ function staticMatchList(records, f) {
   const brLow = (f.branch_name || '').toLowerCase();
 
   return records.filter(r => {
+    if (secCodeSet && !secCodeSet.has(r.sec_code)) return false;
     if (q && !r._search.includes(q)) return false;
     if (f.market && r.market !== f.market) return false;
     if (f.province && r.province !== f.province) return false;
@@ -1416,6 +1483,7 @@ function recTypeBadge(rt) {
 function updateMobileFilterBadge() {
   const f = getFilterObject();
   delete f.q;
+  delete f.sec_codes;
   const cnt = Object.keys(f).length;
   const btn = document.getElementById('btnMobFilter');
   const badge = document.getElementById('mobFilterBadge');
@@ -1630,11 +1698,17 @@ function renderTableRowsHtml(items, startIdx = 0) {
     const endCellHtml = endText.length > 18
       ? `<td class="yield-cell" title="${esc(endText)}"><span class="yield-long">${esc(endText)}</span></td>`
       : `<td class="ctr nowrap">${esc(endText)}</td>`;
+    const isFollowed = Boolean(it.sec_code && state.followedCodes.has(it.sec_code));
     return `<tr>
       <td class="ctr rank-col">${rankNum}</td>
       <td>
-        <span class="click-link" title="${esc(it.company_name)}" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</span>
-        ${subComp}
+        <div class="comp-cell-row">
+          <div class="comp-cell-main">
+            <span class="click-link" title="${esc(it.company_name)}" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</span>
+            ${subComp}
+          </div>
+          <button type="button" class="heart-btn ${isFollowed ? 'active' : ''}" data-code="${esc(it.sec_code)}" data-name="${esc(it.sec_name || it.company_name)}" title="${isFollowed ? '点击取消关注' : '点击关注该上市公司'}" onclick="toggleFollowCompany(event, this)">${HEART_SVG}</button>
+        </div>
       </td>
       <td class="ctr nowrap">${regionCell}</td>
       <td class="ctr">${recTypeBadge(it.record_type)}</td>
@@ -1673,10 +1747,14 @@ function renderMobileCardsHtml(items, startIdx = 0) {
     const incHtml = it.actual_income_wan !== null
       ? `<div class="m-kv-full"><span class="m-k">实际获得收益</span><span class="m-v" style="color:#059669;">${fmtNum(it.actual_income_wan, 2)} 万${it.currency && it.currency !== '人民币' ? esc(it.currency) : '元'}</span></div>`
       : '';
+    const isFollowed = Boolean(it.sec_code && state.followedCodes.has(it.sec_code));
     return `<div class="m-card">
       <div class="m-card-head">
-        <div style="min-width:0;">
-          <div class="m-comp-name" onclick="quickFilterCompany('${esc(it.sec_name)}')"><span class="m-rank-tag">#${rankNum}</span>${esc(it.company_name)}</div>
+        <div style="min-width:0;flex:1;">
+          <div class="m-comp-title-row">
+            <div class="m-comp-name" onclick="quickFilterCompany('${esc(it.sec_name)}')"><span class="m-rank-tag">#${rankNum}</span>${esc(it.company_name)}</div>
+            <button type="button" class="heart-btn ${isFollowed ? 'active' : ''}" data-code="${esc(it.sec_code)}" data-name="${esc(it.sec_name || it.company_name)}" title="${isFollowed ? '点击取消关注' : '点击关注该上市公司'}" onclick="toggleFollowCompany(event, this)">${HEART_SVG}</button>
+          </div>
           <div class="m-comp-sub">
             <span>${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>
             ${regionText ? `<span class="m-region-chip" onclick="quickFilterRegion('${esc(prov)}','${esc(city)}')">${esc(regionText)}</span>` : ''}
@@ -1801,8 +1879,16 @@ async function searchRecords(page = 1) {
   const cardList = document.getElementById('mobileCardList');
 
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="15" class="empty">没有符合筛选条件的记录，请调整筛选条件或点击“重置条件”</td></tr>';
-    cardList.innerHTML = '<div class="empty">没有符合筛选条件的记录，点击“重置条件”查看全部</div>';
+    if (state.followedOnly && state.followedCodes.size === 0) {
+      tbody.innerHTML = '<tr><td colspan="15" class="empty">您还没有关注任何上市公司，点击任意公司名称右侧的 ♡ 即可加入“已关注上市公司”</td></tr>';
+      cardList.innerHTML = '<div class="empty">您还没有关注任何上市公司，点击任意公司名称右侧的 ♡ 即可加入关注</div>';
+    } else if (state.followedOnly) {
+      tbody.innerHTML = '<tr><td colspan="15" class="empty">已关注的上市公司在当前筛选条件下暂无匹配记录，可调整下方筛选条件或点击“已关注上市公司”重置</td></tr>';
+      cardList.innerHTML = '<div class="empty">已关注的上市公司在当前筛选条件下暂无匹配记录</div>';
+    } else {
+      tbody.innerHTML = '<tr><td colspan="15" class="empty">没有符合筛选条件的记录，请调整筛选条件或点击“重置条件”</td></tr>';
+      cardList.innerHTML = '<div class="empty">没有符合筛选条件的记录，点击“重置条件”查看全部</div>';
+    }
   } else {
     tbody.innerHTML = renderTableRowsHtml(items, 0);
     cardList.innerHTML = renderMobileCardsHtml(items, 0);
@@ -1936,7 +2022,46 @@ function toggleSort(col) {
   searchRecords(1);
 }
 
+function showToast(msg) {
+  const el = document.getElementById('toastTip');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  if (state.toastTimer) clearTimeout(state.toastTimer);
+  state.toastTimer = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+function updateFollowedCountBadge() {
+  const badge = document.getElementById('followedCountBadge');
+  if (badge) badge.textContent = String(state.followedCodes.size);
+}
+
+function toggleFollowCompany(ev, btn) {
+  if (ev) ev.stopPropagation();
+  const code = (btn && btn.dataset && btn.dataset.code) || '';
+  const name = (btn && btn.dataset && btn.dataset.name) || code;
+  if (!code) return;
+  const nowFollowed = !state.followedCodes.has(code);
+  if (nowFollowed) state.followedCodes.add(code);
+  else state.followedCodes.delete(code);
+  saveFollowedCodes();
+  updateFollowedCountBadge();
+
+  document.querySelectorAll('.heart-btn').forEach(b => {
+    if (b.dataset.code === code) {
+      b.classList.toggle('active', nowFollowed);
+      b.title = nowFollowed ? '点击取消关注' : '点击关注该上市公司';
+    }
+  });
+
+  showToast(nowFollowed ? `已关注「${name}」` : `已取消关注「${name}」`);
+  if (state.followedOnly && !nowFollowed) {
+    searchRecords(1);
+  }
+}
+
 function resetFilters(runSearch = true) {
+  state.followedOnly = false;
   ['f_q','f_q_mobile','f_province','f_city','f_inst_type','f_inst_main','f_branch','f_prod_type','f_rec_type','f_status','f_fund','f_market','f_min_amt','f_max_amt','f_min_yld','f_max_yld','f_ann_from','f_ann_to','f_end_from','f_end_to'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
@@ -1953,7 +2078,8 @@ function setQuickPreset(key) {
   document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
   const el = document.querySelector(`.pill[data-quick="${key}"]`);
   if (el) el.classList.add('active');
-  if (key === 'active') document.getElementById('f_status').value = '存续中';
+  if (key === 'followed') state.followedOnly = true;
+  else if (key === 'active') document.getElementById('f_status').value = '存续中';
   else if (key === 'matured') document.getElementById('f_status').value = '已到期合集';
   else if (key === 'exp30') {
     document.getElementById('f_status').value = '即将30天到期';
@@ -2070,10 +2196,17 @@ async function loadCompanyRankings() {
     ? staticRankings(rt, '', 100)
     : await fetch(`/api/rankings?record_type=${encodeURIComponent(rt)}&limit=100`).then(r => r.json());
   const comps = data.by_company || [];
-  document.getElementById('rankCompTbody').innerHTML = comps.length ? comps.map((x, i) => `
+  document.getElementById('rankCompTbody').innerHTML = comps.length ? comps.map((x, i) => {
+    const isF = Boolean(x.sec_code && state.followedCodes.has(x.sec_code));
+    return `
     <tr>
       <td class="ctr"><strong>${i+1}</strong></td>
-      <td><span class="click-link" onclick="quickFilterCompany('${esc(x.sec_name)}')">${esc(x.company_name)}</span> <span style="color:var(--muted);font-size:11.5px;">(${esc(x.sec_name)})</span></td>
+      <td>
+        <div class="comp-cell-row">
+          <div class="comp-cell-main"><span class="click-link" onclick="quickFilterCompany('${esc(x.sec_name)}')">${esc(x.company_name)}</span> <span style="color:var(--muted);font-size:11.5px;">(${esc(x.sec_name)})</span></div>
+          <button type="button" class="heart-btn ${isF ? 'active' : ''}" data-code="${esc(x.sec_code)}" data-name="${esc(x.sec_name || x.company_name)}" title="${isF ? '点击取消关注' : '点击关注该上市公司'}" onclick="toggleFollowCompany(event, this)">${HEART_SVG}</button>
+        </div>
+      </td>
       <td class="ctr">${esc(x.sec_code)}</td>
       <td class="ctr nowrap">${esc(x.province ? (x.city && x.city !== '其他/未注明' && !x.city.startsWith(x.province) ? x.province + '·' + x.city : (x.city || x.province)) : '-')}</td>
       <td class="ctr"><span class="badge b-gray">${esc(x.market)}</span></td>
@@ -2082,8 +2215,8 @@ async function loadCompanyRankings() {
       <td class="num">${fmtInt(x.deal_count)}</td>
       <td class="num">${fmtInt(x.inst_count)}</td>
       <td class="num">${x.avg_yield_max !== null ? x.avg_yield_max.toFixed(2)+'%' : '-'}</td>
-    </tr>
-  `).join('') : '<tr><td colspan="10" class="empty">暂无数据</td></tr>';
+    </tr>`;
+  }).join('') : '<tr><td colspan="10" class="empty">暂无数据</td></tr>';
 }
 
 async function loadReview(page = 1) {
@@ -2188,6 +2321,7 @@ async function pollSyncStatus() {
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
+  updateFollowedCountBadge();
   if (IS_STATIC) await initStaticData();
   await Promise.all([loadOverview(), loadFilterOptions(true)]);
   await searchRecords(1);
