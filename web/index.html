@@ -233,9 +233,23 @@
   /* Desktop Data Table */
   .table-wrap {
     overflow-x: auto; border: 1px solid var(--line); border-radius: 8px;
-    max-height: 64vh; overflow-y: auto; background: #fff;
+    max-height: 68vh; overflow-y: auto; background: #fff;
     -webkit-overflow-scrolling: touch;
   }
+  .rank-col {
+    width: 40px; min-width: 36px; text-align: center; color: #94a3b8;
+    font-size: 11.5px; font-variant-numeric: tabular-nums; padding-left: 6px !important; padding-right: 6px !important;
+  }
+  .m-rank-tag {
+    display: inline-block; font-size: 11px; font-weight: 700; color: #64748b;
+    background: #f1f5f9; border-radius: 4px; padding: 0 5px; margin-right: 5px;
+    font-variant-numeric: tabular-nums; vertical-align: 1px;
+  }
+  .scroll-sentinel {
+    padding: 11px 12px; text-align: center; font-size: 12px; color: var(--muted);
+    background: #fafbfc; border-top: 1px solid #f1f5f9;
+  }
+  #mobileScrollSentinel { display: none; background: transparent; border: none; padding: 14px 10px; }
   table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; }
   thead th {
     position: sticky; top: 0; z-index: 2;
@@ -409,6 +423,7 @@
     /* Switch desktop table -> mobile cards */
     #desktopTableWrap { display: none; }
     #mobileCardList { display: flex; }
+    #mobileScrollSentinel { display: block; }
 
     .pager { justify-content: center; }
   }
@@ -652,9 +667,9 @@
           <button class="btn btn-outline" onclick="resetFilters()">重置条件</button>
           <span style="width:1px;height:18px;background:#e2e8f0;margin:0 2px;"></span>
           <select id="pageSizeSel" style="height:32px;border:1px solid #cbd5e1;border-radius:6px;padding:0 8px;background:#fff;" onchange="searchRecords(1)">
-            <option value="50" selected>50 条/页</option>
-            <option value="100">100 条/页</option>
-            <option value="200">200 条/页</option>
+            <option value="50">每次加载 50 条</option>
+            <option value="100" selected>每次加载 100 条</option>
+            <option value="200">每次加载 200 条</option>
           </select>
         </div>
       </div>
@@ -680,6 +695,7 @@
       <table>
         <thead>
           <tr>
+            <th class="ctr rank-col">#</th>
             <th class="sortable" title="点击排序" onclick="toggleSort('company_name')">上市公司主体 <span id="sort_company_name"></span></th>
             <th class="ctr sortable" title="点击排序" onclick="toggleSort('province')">区域 <span id="sort_province"></span></th>
             <th class="ctr sortable" title="点击排序" onclick="toggleSort('record_type')">交易类型 <span id="sort_record_type"></span></th>
@@ -697,22 +713,24 @@
           </tr>
         </thead>
         <tbody id="recordsTbody">
-          <tr><td colspan="14" class="empty">正在加载数据...</td></tr>
+          <tr><td colspan="15" class="empty">正在加载数据...</td></tr>
         </tbody>
       </table>
+      <div id="tableScrollSentinel" class="scroll-sentinel"></div>
     </div>
 
     <!-- Mobile Card List -->
     <div class="mobile-cards" id="mobileCardList">
       <div class="empty">正在加载数据...</div>
     </div>
+    <div id="mobileScrollSentinel" class="scroll-sentinel"></div>
 
     <div class="pager">
       <div id="pagerInfo" style="color:var(--muted);font-size:12.5px;">-</div>
       <div class="pager-controls">
-        <button class="btn btn-outline btn-sm" id="btnPrev" onclick="goPage(-1)">上一页</button>
-        <span id="pageNumLabel" style="padding:0 8px;font-weight:600;">1 / 1</span>
-        <button class="btn btn-outline btn-sm" id="btnNext" onclick="goPage(1)">下一页</button>
+        <button class="btn btn-outline btn-sm hidden" id="btnLoadMore" onclick="loadMoreRecords()">继续加载更多</button>
+        <button class="btn btn-outline btn-sm hidden" id="btnLoadAll" onclick="loadAllRemaining()">展开剩余全部</button>
+        <button class="btn btn-outline btn-sm hidden" id="btnBackTop" onclick="scrollRecordsTop()">回到顶部 ↑</button>
       </div>
     </div>
   </div>
@@ -903,6 +921,10 @@ const state = {
   tab: 'records',
   page: 1,
   total: 0,
+  loadedCount: 0,
+  loadingMore: false,
+  hasMore: false,
+  querySeq: 0,
   sort_by: 'announce_date',
   sort_dir: 'desc',
   revPage: 1,
@@ -1171,6 +1193,13 @@ function staticFilters(f) {
 }
 
 function staticQueryRecords(f, sortBy, sortDir, page, pageSize) {
+  if (page > 1 && state.lastFilteredStatic) {
+    const start = (page - 1) * pageSize;
+    return {
+      total: state.lastFilteredStatic.length,
+      items: state.lastFilteredStatic.slice(start, start + pageSize),
+    };
+  }
   const matched = staticMatchList(state.staticRecords, f);
   const sorted = staticSort(matched, sortBy, sortDir);
   state.lastFilteredStatic = sorted;
@@ -1570,25 +1599,194 @@ document.addEventListener('click', (e) => {
   if (wrap && !wrap.contains(e.target)) closeInstCombo();
 });
 
+function renderTableRowsHtml(items, startIdx = 0) {
+  return items.map((it, idx) => {
+    const rankNum = startIdx + idx + 1;
+    const subComp = it.entrusting_party && it.entrusting_party !== it.company_name
+      ? `<span class="sub-meta">${esc(it.sec_code)} ${esc(it.sec_name)} · 委托方:${esc(it.entrusting_party)}</span>`
+      : `<span class="sub-meta">${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>`;
+    const prov = it.province || '';
+    const city = (it.city && it.city !== '其他/未注明') ? it.city : '';
+    const isMuni = prov && city && city.startsWith(prov);
+    const regionCell = prov
+      ? (isMuni
+          ? `<span class="click-link" onclick="quickFilterRegion('${esc(prov)}','')">${esc(city)}</span>`
+          : `<span class="click-link" onclick="quickFilterRegion('${esc(prov)}','')">${esc(prov)}</span>${city ? `<span class="sub-meta click-link" style="font-weight:400;" onclick="quickFilterRegion('${esc(prov)}','${esc(city)}')">${esc(city)}</span>` : ''}`)
+      : '<span style="color:#94a3b8;">-</span>';
+    const amtDisp = it.amount_wan !== null
+      ? `<strong>${fmtNum(it.amount_wan, 2)}</strong>${it.currency && it.currency !== '人民币' ? `<span class="sub-meta">${esc(it.currency)}</span>` : ''}`
+      : '-';
+    const branchDisp = (it.branch_name && it.branch_name !== '未披露')
+      ? `<span style="color:#0f172a;font-weight:500;">${esc(it.branch_name)}</span>`
+      : `<span style="color:#94a3b8;">未披露</span>`;
+    const incDisp = it.actual_income_wan !== null
+      ? `${fmtNum(it.actual_income_wan, 2)}${it.currency && it.currency !== '人民币' ? `<span class="sub-meta">${esc(it.currency)}</span>` : ''}`
+      : '<span style="color:#cbd5e1;">-</span>';
+    const yrText = it.yield_rate_raw || '-';
+    const yieldCellHtml = yrText.length > 16
+      ? `<td class="yield-cell" title="${esc(yrText)}"><span class="yield-long">${esc(yrText)}</span></td>`
+      : `<td class="yield-cell"><span class="yield-short">${esc(yrText)}</span></td>`;
+    const endText = it.end_date || '-';
+    const endCellHtml = endText.length > 18
+      ? `<td class="yield-cell" title="${esc(endText)}"><span class="yield-long">${esc(endText)}</span></td>`
+      : `<td class="ctr nowrap">${esc(endText)}</td>`;
+    return `<tr>
+      <td class="ctr rank-col">${rankNum}</td>
+      <td>
+        <span class="click-link" title="${esc(it.company_name)}" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</span>
+        ${subComp}
+      </td>
+      <td class="ctr nowrap">${regionCell}</td>
+      <td class="ctr">${recTypeBadge(it.record_type)}</td>
+      <td class="ctr">${statusBadge(it.maturity_status)}</td>
+      <td>
+        <span class="click-link" onclick="quickFilterInst('${esc(it.institution_main)}')">${esc(it.institution_main || '-')}</span>
+        <span class="sub-meta">${esc(it.institution_type || '')}</span>
+      </td>
+      <td>${branchDisp}</td>
+      <td>
+        <span class="ellipsis" title="${esc(it.product_name)}">${esc(it.product_name || '-')}</span>
+        <span class="sub-meta">${esc(it.product_type || '')}${it.product_type_raw && it.product_type_raw !== it.product_type ? ' · ' + esc(it.product_type_raw) : ''}</span>
+      </td>
+      <td class="num">${amtDisp}</td>
+      ${yieldCellHtml}
+      <td class="ctr nowrap">${esc(it.start_date || '-')}</td>
+      ${endCellHtml}
+      <td class="num">${incDisp}</td>
+      <td class="ctr"><span class="badge b-gray">${esc(it.fund_source || '未注明')}</span></td>
+      <td class="ctr nowrap">
+        <div>${esc(it.announce_date)}</div>
+        <a href="${esc(it.pdf_url)}" target="_blank" rel="noopener" style="font-size:11.5px;">查看PDF ↗</a>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderMobileCardsHtml(items, startIdx = 0) {
+  return items.map((it, idx) => {
+    const rankNum = startIdx + idx + 1;
+    const prov = it.province || '';
+    const city = (it.city && it.city !== '其他/未注明') ? it.city : '';
+    const regionText = prov ? (city && !city.startsWith(prov) ? `${prov}·${city}` : (city || prov)) : '';
+    const brText = (it.branch_name && it.branch_name !== '未披露') ? it.branch_name : '未披露';
+    const dateSpan = `${it.start_date || '-'} → ${it.end_date || '-'}`;
+    const incHtml = it.actual_income_wan !== null
+      ? `<div class="m-kv-full"><span class="m-k">实际获得收益</span><span class="m-v" style="color:#059669;">${fmtNum(it.actual_income_wan, 2)} 万${it.currency && it.currency !== '人民币' ? esc(it.currency) : '元'}</span></div>`
+      : '';
+    return `<div class="m-card">
+      <div class="m-card-head">
+        <div style="min-width:0;">
+          <div class="m-comp-name" onclick="quickFilterCompany('${esc(it.sec_name)}')"><span class="m-rank-tag">#${rankNum}</span>${esc(it.company_name)}</div>
+          <div class="m-comp-sub">
+            <span>${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>
+            ${regionText ? `<span class="m-region-chip" onclick="quickFilterRegion('${esc(prov)}','${esc(city)}')">${esc(regionText)}</span>` : ''}
+          </div>
+        </div>
+        <div class="m-badges">
+          ${statusBadge(it.maturity_status)}
+          ${recTypeBadge(it.record_type)}
+        </div>
+      </div>
+      <div class="m-hero">
+        <div class="m-amt">${it.amount_wan !== null ? fmtNum(it.amount_wan, 2) : '-'}<small>万${it.currency && it.currency !== '人民币' ? esc(it.currency) : '元'}</small></div>
+        <div class="m-yield">收益 ${esc(it.yield_rate_raw || '-')}</div>
+      </div>
+      <div class="m-grid">
+        <div><span class="m-k">受托机构（${esc(it.institution_type || '机构')}）</span><span class="m-v" style="color:var(--primary);" onclick="quickFilterInst('${esc(it.institution_main)}')">${esc(it.institution_main || '-')}</span></div>
+        <div><span class="m-k">分支行 / 营业部</span><span class="m-v">${esc(brText)}</span></div>
+        <div class="m-kv-full"><span class="m-k">产品名称（${esc(it.product_type || '理财')}）</span><span class="m-v">${esc(it.product_name || '-')}</span></div>
+        <div class="m-kv-full"><span class="m-k">起息日 → 到期日</span><span class="m-v">${esc(dateSpan)}</span></div>
+        ${incHtml}
+      </div>
+      <div class="m-foot">
+        <div><span class="badge b-gray" style="margin-right:6px;">${esc(it.fund_source || '未注明')}</span><span>公告 ${esc(it.announce_date)}</span></div>
+        <a class="m-pdf-btn" href="${esc(it.pdf_url)}" target="_blank" rel="noopener">查看PDF ↗</a>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateLoadStatusUI() {
+  const pageSize = Number(document.getElementById('pageSizeSel').value || 100);
+  const rem = Math.max(0, state.total - state.loadedCount);
+  const infoEl = document.getElementById('pagerInfo');
+  const sentDesk = document.getElementById('tableScrollSentinel');
+  const sentMob = document.getElementById('mobileScrollSentinel');
+  const btnMore = document.getElementById('btnLoadMore');
+  const btnAll = document.getElementById('btnLoadAll');
+  const btnTop = document.getElementById('btnBackTop');
+
+  if (state.total === 0) {
+    infoEl.textContent = '共 0 条记录';
+    sentDesk.textContent = '';
+    sentMob.textContent = '';
+    btnMore.classList.add('hidden');
+    btnAll.classList.add('hidden');
+    btnTop.classList.add('hidden');
+    return;
+  }
+
+  if (state.loadingMore && state.loadedCount > 0) {
+    infoEl.textContent = `已加载 ${fmtInt(state.loadedCount)} / ${fmtInt(state.total)} 条，正在加载更多...`;
+    sentDesk.textContent = '正在加载更多记录...';
+    sentMob.textContent = '正在加载更多记录...';
+    btnMore.disabled = true;
+    btnAll.disabled = true;
+    return;
+  }
+
+  btnMore.disabled = false;
+  btnAll.disabled = false;
+  if (state.hasMore) {
+    const nextBatch = Math.min(pageSize, rem);
+    infoEl.textContent = `已加载 ${fmtInt(state.loadedCount)} / ${fmtInt(state.total)} 条（向下滚动自动加载更多）`;
+    sentDesk.textContent = `向下滚动继续自动加载（还有 ${fmtInt(rem)} 条）`;
+    sentMob.textContent = `上滑继续自动加载（还有 ${fmtInt(rem)} 条）`;
+    btnMore.textContent = `继续加载 ${nextBatch} 条`;
+    btnMore.classList.remove('hidden');
+    if (rem <= 500 && rem > nextBatch) {
+      btnAll.textContent = `展开剩余全部 (+${rem}条)`;
+      btnAll.classList.remove('hidden');
+    } else {
+      btnAll.classList.add('hidden');
+    }
+  } else {
+    infoEl.textContent = `已显示全部 ${fmtInt(state.total)} 条记录`;
+    sentDesk.textContent = `— 已显示全部 ${fmtInt(state.total)} 条 —`;
+    sentMob.textContent = `— 已显示全部 ${fmtInt(state.total)} 条 —`;
+    btnMore.classList.add('hidden');
+    btnAll.classList.add('hidden');
+  }
+  const wrap = document.getElementById('desktopTableWrap');
+  const showTop = state.loadedCount > pageSize || (wrap && wrap.scrollTop > 220) || window.scrollY > 400;
+  btnTop.classList.toggle('hidden', !showTop);
+}
+
 async function searchRecords(page = 1) {
-  state.page = page;
+  const seq = ++state.querySeq;
+  state.page = 1;
+  state.loadedCount = 0;
+  state.hasMore = false;
+  state.loadingMore = true;
   updateMobileFilterBadge();
-  const pageSize = Number(document.getElementById('pageSizeSel').value || 50);
+  const pageSize = Number(document.getElementById('pageSizeSel').value || 100);
+  const wrap = document.getElementById('desktopTableWrap');
+  if (wrap) wrap.scrollTop = 0;
 
   let data;
   if (IS_STATIC) {
     const f = getFilterObject();
-    data = staticQueryRecords(f, state.sort_by, state.sort_dir, page, pageSize);
-    if (page === 1) await loadFilterOptions(false);
+    data = staticQueryRecords(f, state.sort_by, state.sort_dir, 1, pageSize);
+    await loadFilterOptions(false);
   } else {
     const p = getFilterParams();
-    p.set('page', page);
+    p.set('page', 1);
     p.set('page_size', pageSize);
-    document.getElementById('recordsTbody').innerHTML = '<tr><td colspan="14" class="empty">查询中...</td></tr>';
-    const reqs = [fetch('/api/records?' + p.toString()).then(r => r.json())];
-    if (page === 1) reqs.push(loadFilterOptions(false));
+    document.getElementById('recordsTbody').innerHTML = '<tr><td colspan="15" class="empty">查询中...</td></tr>';
+    const reqs = [fetch('/api/records?' + p.toString()).then(r => r.json()), loadFilterOptions(false)];
     [data] = await Promise.all(reqs);
   }
+  if (seq !== state.querySeq) return;
 
   state.total = data.total || 0;
   document.getElementById('sumCount').textContent = fmtInt(data.total);
@@ -1603,128 +1801,131 @@ async function searchRecords(page = 1) {
   const cardList = document.getElementById('mobileCardList');
 
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="14" class="empty">没有符合筛选条件的记录，请调整筛选条件或点击“重置条件”</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="15" class="empty">没有符合筛选条件的记录，请调整筛选条件或点击“重置条件”</td></tr>';
     cardList.innerHTML = '<div class="empty">没有符合筛选条件的记录，点击“重置条件”查看全部</div>';
   } else {
-    tbody.innerHTML = items.map(it => {
-      const subComp = it.entrusting_party && it.entrusting_party !== it.company_name
-        ? `<span class="sub-meta">${esc(it.sec_code)} ${esc(it.sec_name)} · 委托方:${esc(it.entrusting_party)}</span>`
-        : `<span class="sub-meta">${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>`;
-      const prov = it.province || '';
-      const city = (it.city && it.city !== '其他/未注明') ? it.city : '';
-      const isMuni = prov && city && city.startsWith(prov);
-      const regionCell = prov
-        ? (isMuni
-            ? `<span class="click-link" onclick="quickFilterRegion('${esc(prov)}','')">${esc(city)}</span>`
-            : `<span class="click-link" onclick="quickFilterRegion('${esc(prov)}','')">${esc(prov)}</span>${city ? `<span class="sub-meta click-link" style="font-weight:400;" onclick="quickFilterRegion('${esc(prov)}','${esc(city)}')">${esc(city)}</span>` : ''}`)
-        : '<span style="color:#94a3b8;">-</span>';
-      const amtDisp = it.amount_wan !== null
-        ? `<strong>${fmtNum(it.amount_wan, 2)}</strong>${it.currency && it.currency !== '人民币' ? `<span class="sub-meta">${esc(it.currency)}</span>` : ''}`
-        : '-';
-      const branchDisp = (it.branch_name && it.branch_name !== '未披露')
-        ? `<span style="color:#0f172a;font-weight:500;">${esc(it.branch_name)}</span>`
-        : `<span style="color:#94a3b8;">未披露</span>`;
-      const incDisp = it.actual_income_wan !== null
-        ? `${fmtNum(it.actual_income_wan, 2)}${it.currency && it.currency !== '人民币' ? `<span class="sub-meta">${esc(it.currency)}</span>` : ''}`
-        : '<span style="color:#cbd5e1;">-</span>';
-      const yrText = it.yield_rate_raw || '-';
-      const yieldCellHtml = yrText.length > 16
-        ? `<td class="yield-cell" title="${esc(yrText)}"><span class="yield-long">${esc(yrText)}</span></td>`
-        : `<td class="yield-cell"><span class="yield-short">${esc(yrText)}</span></td>`;
-      const endText = it.end_date || '-';
-      const endCellHtml = endText.length > 18
-        ? `<td class="yield-cell" title="${esc(endText)}"><span class="yield-long">${esc(endText)}</span></td>`
-        : `<td class="ctr nowrap">${esc(endText)}</td>`;
-      return `<tr>
-        <td>
-          <span class="click-link" title="${esc(it.company_name)}" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</span>
-          ${subComp}
-        </td>
-        <td class="ctr nowrap">${regionCell}</td>
-        <td class="ctr">${recTypeBadge(it.record_type)}</td>
-        <td class="ctr">${statusBadge(it.maturity_status)}</td>
-        <td>
-          <span class="click-link" onclick="quickFilterInst('${esc(it.institution_main)}')">${esc(it.institution_main || '-')}</span>
-          <span class="sub-meta">${esc(it.institution_type || '')}</span>
-        </td>
-        <td>${branchDisp}</td>
-        <td>
-          <span class="ellipsis" title="${esc(it.product_name)}">${esc(it.product_name || '-')}</span>
-          <span class="sub-meta">${esc(it.product_type || '')}${it.product_type_raw && it.product_type_raw !== it.product_type ? ' · ' + esc(it.product_type_raw) : ''}</span>
-        </td>
-        <td class="num">${amtDisp}</td>
-        ${yieldCellHtml}
-        <td class="ctr nowrap">${esc(it.start_date || '-')}</td>
-        ${endCellHtml}
-        <td class="num">${incDisp}</td>
-        <td class="ctr"><span class="badge b-gray">${esc(it.fund_source || '未注明')}</span></td>
-        <td class="ctr nowrap">
-          <div>${esc(it.announce_date)}</div>
-          <a href="${esc(it.pdf_url)}" target="_blank" rel="noopener" style="font-size:11.5px;">查看PDF ↗</a>
-        </td>
-      </tr>`;
-    }).join('');
-
-    // Render Native-Feeling Mobile Cards
-    cardList.innerHTML = items.map(it => {
-      const prov = it.province || '';
-      const city = (it.city && it.city !== '其他/未注明') ? it.city : '';
-      const regionText = prov ? (city && !city.startsWith(prov) ? `${prov}·${city}` : (city || prov)) : '';
-      const brText = (it.branch_name && it.branch_name !== '未披露') ? it.branch_name : '未披露';
-      const dateSpan = `${it.start_date || '-'} → ${it.end_date || '-'}`;
-      const incHtml = it.actual_income_wan !== null
-        ? `<div class="m-kv-full"><span class="m-k">实际获得收益</span><span class="m-v" style="color:#059669;">${fmtNum(it.actual_income_wan, 2)} 万${it.currency && it.currency !== '人民币' ? esc(it.currency) : '元'}</span></div>`
-        : '';
-      return `<div class="m-card">
-        <div class="m-card-head">
-          <div style="min-width:0;">
-            <div class="m-comp-name" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</div>
-            <div class="m-comp-sub">
-              <span>${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>
-              ${regionText ? `<span class="m-region-chip" onclick="quickFilterRegion('${esc(prov)}','${esc(city)}')">${esc(regionText)}</span>` : ''}
-            </div>
-          </div>
-          <div class="m-badges">
-            ${statusBadge(it.maturity_status)}
-            ${recTypeBadge(it.record_type)}
-          </div>
-        </div>
-        <div class="m-hero">
-          <div class="m-amt">${it.amount_wan !== null ? fmtNum(it.amount_wan, 2) : '-'}<small>万${it.currency && it.currency !== '人民币' ? esc(it.currency) : '元'}</small></div>
-          <div class="m-yield">收益 ${esc(it.yield_rate_raw || '-')}</div>
-        </div>
-        <div class="m-grid">
-          <div><span class="m-k">受托机构（${esc(it.institution_type || '机构')}）</span><span class="m-v" style="color:var(--primary);" onclick="quickFilterInst('${esc(it.institution_main)}')">${esc(it.institution_main || '-')}</span></div>
-          <div><span class="m-k">分支行 / 营业部</span><span class="m-v">${esc(brText)}</span></div>
-          <div class="m-kv-full"><span class="m-k">产品名称（${esc(it.product_type || '理财')}）</span><span class="m-v">${esc(it.product_name || '-')}</span></div>
-          <div class="m-kv-full"><span class="m-k">起息日 → 到期日</span><span class="m-v">${esc(dateSpan)}</span></div>
-          ${incHtml}
-        </div>
-        <div class="m-foot">
-          <div><span class="badge b-gray" style="margin-right:6px;">${esc(it.fund_source || '未注明')}</span><span>公告 ${esc(it.announce_date)}</span></div>
-          <a class="m-pdf-btn" href="${esc(it.pdf_url)}" target="_blank" rel="noopener">查看PDF ↗</a>
-        </div>
-      </div>`;
-    }).join('');
+    tbody.innerHTML = renderTableRowsHtml(items, 0);
+    cardList.innerHTML = renderMobileCardsHtml(items, 0);
   }
 
-  const totalPages = Math.max(1, Math.ceil(state.total / pageSize));
-  const startRow = state.total ? (page - 1) * pageSize + 1 : 0;
-  const endRow = Math.min(state.total, page * pageSize);
-  document.getElementById('pagerInfo').textContent = `显示第 ${startRow} - ${endRow} 条，共 ${fmtInt(state.total)} 条`;
-  document.getElementById('pageNumLabel').textContent = `${page} / ${totalPages}`;
-  document.getElementById('btnPrev').disabled = page <= 1;
-  document.getElementById('btnNext').disabled = page >= totalPages;
+  state.loadedCount = items.length;
+  state.hasMore = state.loadedCount < state.total;
+  state.loadingMore = false;
+  updateLoadStatusUI();
 }
 
-function goPage(delta) {
-  const pageSize = Number(document.getElementById('pageSizeSel').value || 50);
-  const totalPages = Math.max(1, Math.ceil(state.total / pageSize));
-  const nxt = Math.max(1, Math.min(totalPages, state.page + delta));
-  if (nxt !== state.page) {
-    searchRecords(nxt);
-    if (window.innerWidth <= 768) window.scrollTo({ top: 0, behavior: 'smooth' });
+async function loadMoreRecords() {
+  if (state.loadingMore || !state.hasMore || state.tab !== 'records') return;
+  const seq = state.querySeq;
+  const pageSize = Number(document.getElementById('pageSizeSel').value || 100);
+  state.loadingMore = true;
+  updateLoadStatusUI();
+
+  let items = [];
+  if (IS_STATIC) {
+    const src = state.lastFilteredStatic || [];
+    items = src.slice(state.loadedCount, state.loadedCount + pageSize);
+  } else {
+    const nextPage = state.page + 1;
+    const p = getFilterParams();
+    p.set('page', nextPage);
+    p.set('page_size', pageSize);
+    const data = await fetch('/api/records?' + p.toString()).then(r => r.json());
+    if (seq !== state.querySeq) return;
+    items = data.items || [];
+    state.page = nextPage;
   }
+  if (seq !== state.querySeq) return;
+
+  if (items.length) {
+    const startIdx = state.loadedCount;
+    document.getElementById('recordsTbody').insertAdjacentHTML('beforeend', renderTableRowsHtml(items, startIdx));
+    document.getElementById('mobileCardList').insertAdjacentHTML('beforeend', renderMobileCardsHtml(items, startIdx));
+    state.loadedCount += items.length;
+  }
+  state.hasMore = items.length > 0 && state.loadedCount < state.total;
+  state.loadingMore = false;
+  updateLoadStatusUI();
+}
+
+async function loadAllRemaining() {
+  if (state.loadingMore || !state.hasMore) return;
+  const rem = state.total - state.loadedCount;
+  if (rem <= 0 || rem > 500) return;
+  if (IS_STATIC) {
+    const startIdx = state.loadedCount;
+    const items = (state.lastFilteredStatic || []).slice(startIdx);
+    if (items.length) {
+      document.getElementById('recordsTbody').insertAdjacentHTML('beforeend', renderTableRowsHtml(items, startIdx));
+      document.getElementById('mobileCardList').insertAdjacentHTML('beforeend', renderMobileCardsHtml(items, startIdx));
+      state.loadedCount += items.length;
+    }
+    state.hasMore = false;
+    updateLoadStatusUI();
+  } else {
+    while (state.hasMore) {
+      const before = state.loadedCount;
+      await loadMoreRecords();
+      if (state.loadedCount <= before) break;
+    }
+  }
+}
+
+function scrollRecordsTop() {
+  const wrap = document.getElementById('desktopTableWrap');
+  if (wrap && wrap.offsetParent !== null) {
+    wrap.scrollTo({ top: 0, behavior: 'smooth' });
+  } else {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
+function initInfiniteScroll() {
+  const wrap = document.getElementById('desktopTableWrap');
+  const sentDesk = document.getElementById('tableScrollSentinel');
+  const cardList = document.getElementById('mobileCardList');
+  const sentMob = document.getElementById('mobileScrollSentinel');
+
+  if ('IntersectionObserver' in window) {
+    const deskObs = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting) && wrap && wrap.offsetParent !== null) {
+        loadMoreRecords();
+      }
+    }, { root: wrap, rootMargin: '0px 0px 260px 0px' });
+    if (sentDesk) deskObs.observe(sentDesk);
+
+    const mobObs = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting) && cardList && cardList.offsetParent !== null) {
+        loadMoreRecords();
+      }
+    }, { root: null, rootMargin: '0px 0px 320px 0px' });
+    if (sentMob) mobObs.observe(sentMob);
+  }
+
+  if (wrap) {
+    wrap.addEventListener('scroll', () => {
+      const btnTop = document.getElementById('btnBackTop');
+      if (btnTop && state.total > 0) {
+        btnTop.classList.toggle('hidden', wrap.scrollTop <= 220 && state.loadedCount <= Number(document.getElementById('pageSizeSel').value || 100));
+      }
+      if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 260) {
+        loadMoreRecords();
+      }
+    }, { passive: true });
+  }
+
+  window.addEventListener('scroll', () => {
+    if (state.tab !== 'records') return;
+    if (cardList && cardList.offsetParent !== null) {
+      const btnTop = document.getElementById('btnBackTop');
+      if (btnTop && state.total > 0) {
+        btnTop.classList.toggle('hidden', window.scrollY <= 400 && state.loadedCount <= Number(document.getElementById('pageSizeSel').value || 100));
+      }
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 320) {
+        loadMoreRecords();
+      }
+    }
+  }, { passive: true });
 }
 
 function toggleSort(col) {
@@ -1990,6 +2191,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (IS_STATIC) await initStaticData();
   await Promise.all([loadOverview(), loadFilterOptions(true)]);
   await searchRecords(1);
+  initInfiniteScroll();
   if (!IS_STATIC) pollSyncStatus();
 });
 </script>
