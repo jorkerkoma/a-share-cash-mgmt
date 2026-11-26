@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: '回溯抓取天数（日常增量填 5，补抓全量近3个月填 92）'
+        description: '回溯抓取天数（日常增量填 5，补抓今年全年填 365）'
         required: false
         default: '5'
 

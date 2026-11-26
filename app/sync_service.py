@@ -1,5 +1,5 @@
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -61,6 +61,16 @@ class SyncState:
 
 
 SYNC_STATE = SyncState()
+
+_WORKER_SESSION = None
+
+
+def _process_one_in_worker(ann: Dict[str, Any]) -> Dict[str, Any]:
+    """多进程模式下的顶层 worker：每个子进程复用独立 HTTP 连接池，PDF 纯内存解析不落盘。"""
+    global _WORKER_SESSION
+    if _WORKER_SESSION is None:
+        _WORKER_SESSION = create_cninfo_session()
+    return _process_one_announcement(ann, _WORKER_SESSION)
 
 
 def _process_one_announcement(ann: Dict[str, Any], session) -> Dict[str, Any]:
@@ -142,6 +152,7 @@ def run_sync(
     keywords: Optional[List[str]] = None,
     incremental: bool = True,
     max_workers: int = MAX_WORKERS,
+    use_processes: bool = False,
     limit: Optional[int] = None,
     verbose: bool = True,
 ) -> Dict[str, Any]:
@@ -151,7 +162,7 @@ def run_sync(
 
     today = date.today()
     date_to = date_to or today.strftime("%Y-%m-%d")
-    date_from = date_from or (today - timedelta(days=DEFAULT_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    date_from = date_from or f"{today.year}-01-01"
     keywords = keywords or DEFAULT_KEYWORDS
 
     started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -259,8 +270,12 @@ def run_sync(
             buf.clear()
 
         if to_fetch:
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(_process_one_announcement, a, session): a for a in to_fetch}
+            pool_cls = ProcessPoolExecutor if use_processes else ThreadPoolExecutor
+            with pool_cls(max_workers=max_workers) as executor:
+                if use_processes:
+                    futures = {executor.submit(_process_one_in_worker, a): a for a in to_fetch}
+                else:
+                    futures = {executor.submit(_process_one_announcement, a, session): a for a in to_fetch}
                 for fut in as_completed(futures):
                     res = fut.result()
                     ann_row = res["ann_row"]

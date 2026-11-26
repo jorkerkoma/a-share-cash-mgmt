@@ -784,8 +784,12 @@ def _rows_to_records(
             last_fund_source = fund_raw
 
         amount_wan, currency = parse_amount_wan(amt_raw, amt_hdr, unit_hint)
-        # 严控碎片行与0元错位行（正常单笔购买/赎回金额必须大于 0）
+        # 严控碎片行、0元错位行，以及额度计划表中的“不超过XX亿元/最高余额上限”计划行
         if amount_wan is None or amount_wan <= 0:
+            continue
+        if any(k in amt_raw for k in ("不超过", "最高余额", "余额上限")):
+            continue
+        if any(k in inst_raw for k in ("大型商业银行", "股份制商业银行", "及其他金融机构", "合格专业机构")):
             continue
 
         if not prod_name and prod_type_raw:
@@ -846,15 +850,35 @@ def _rows_to_records(
         actual_income_wan = parse_income_wan(income_raw, income_hdr, amount_wan, unit_hint) if income_raw else None
 
         inst_type, inst_main, branch_name = normalize_institution(inst_raw, full_text)
-        # 仅当受托方列缺失且产品名中明确含真实银行/券商/理财子名时才从产品名兜底，绝不把产品后缀当作分支行
-        if not inst_main and prod_name:
-            cand_type, cand_main, cand_branch = normalize_institution(prod_name, full_text)
-            if cand_type != "其他" and cand_main:
-                if cand_branch and not re.search(r"(?:分行营业部|支行营业部|分行|支行|营业部|营业室|分理处)$", cand_branch):
-                    cand_branch = "未披露"
-                inst_type, inst_main, branch_name = cand_type, cand_main, cand_branch
+        # 仅当受托方列缺失且产品名中明确含真实银行/券商/理财子名或专属系列品牌时才兜底，绝不把产品名当作机构名
+        if (not inst_main or inst_main == "未披露") and prod_name:
+            brand_infer = [
+                ("利多多", ("银行", "上海浦东发展银行", "未披露")),
+                ("幸福99", ("银行", "杭州银行", "未披露")),
+                ("阳光金", ("银行理财子", "光大理财", "未披露")),
+                ("聚益生金", ("银行", "中国农业银行", "未披露")),
+            ]
+            matched_brand = None
+            for bk, bval in brand_infer:
+                if bk in prod_name:
+                    matched_brand = bval
+                    break
+            if matched_brand:
+                inst_type, inst_main, branch_name = matched_brand
             else:
-                inst_type, inst_main, branch_name = "其他", "未披露", "未披露"
+                cand_type, cand_main, cand_branch = normalize_institution(prod_name, full_text)
+                if (
+                    cand_type != "其他"
+                    and cand_main
+                    and cand_main != "未披露"
+                    and len(cand_main) <= 14
+                    and not re.search(r"\d|期|号|款|产品|存款|存单|计划|策略", cand_main)
+                ):
+                    if cand_branch and not re.search(r"(?:分行营业部|支行营业部|分行|支行|营业部|营业室|分理处)$", cand_branch):
+                        cand_branch = "未披露"
+                    inst_type, inst_main, branch_name = cand_type, cand_main, cand_branch
+                else:
+                    inst_type, inst_main, branch_name = "其他", "未披露", "未披露"
 
         prod_type_std = normalize_product_type(prod_name, prod_type_raw)
         maturity_status = compute_maturity_status(row_rec_type, end_disp, end_iso, term_raw)
@@ -1172,6 +1196,17 @@ def parse_pdf_announcement(
         return extracted
 
     records = run_table_pipeline(raw_tables)
+
+    # 提前识别纯额度授权公告，避免在无任何交易明细表的PDF上浪费慢速 pdfplumber 解析
+    if (
+        not records
+        and _looks_like_quota_only(ann["title"], full_text)
+        and not any(
+            k in full_text
+            for k in ("认购金额", "购买金额", "受托方", "受托人", "产品名称", "理财产品名称", "起息日", "到期日")
+        )
+    ):
+        return (company_name, "quota_only", "额度授权/审议类公告，无具体购买明细", [])
 
     if not records:
         try:

@@ -13,7 +13,7 @@ const ROUTES = {
     contentType: "application/json; charset=utf-8",
   },
   "/data/all.xlsx": {
-    file: encodeURIComponent(EXCEL_FILENAME),
+    file: "all.xlsx",
     contentType:
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     disposition: `attachment; filename="cash_mgmt_all.xlsx"; filename*=UTF-8''${encodeURIComponent(

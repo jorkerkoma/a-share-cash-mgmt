@@ -129,31 +129,48 @@ def normalize_institution(raw: str, body_text: str = "") -> Tuple[str, str, str]
     # 去掉“（以下简称...）”
     text_clean = re.sub(r"[（(]以下简称[^）)]*[）)]", "", text_clean)
 
+    # 修正公告原文常见银行笔误
+    text_clean = text_clean.replace("中国建行股份股份有限公司", "中国建设银行股份有限公司")
+    text_clean = text_clean.replace("中国建行股份有限公司", "中国建设银行股份有限公司")
+    text_clean = text_clean.replace("中国农行股份有限公司", "中国农业银行股份有限公司")
+    text_clean = text_clean.replace("中国农业银河股份有限公司", "中国农业银行股份有限公司")
+
     # 1. 判断机构类型（兼容中文及常见外资银行英文名）
     upper_raw = clean_keep_spaces(raw).upper()
     inst_type = "其他"
-    if any(k in text_clean for k in WEALTH_SUB_KEYWORDS) or ("理财" in text_clean and "银行" not in text_clean):
+    if any(k in text_clean for k in WEALTH_SUB_KEYWORDS) or (
+        "理财" in text_clean
+        and "银行" not in text_clean
+        and not any(p in text_clean for p in ("理财产品", "理财计划", "理财A款", "理财B款", "理财C款"))
+    ):
         inst_type = "银行理财子"
+    elif any(k in text_clean for k in ("资本管理", "私募基金", "私募证券", "资产管理", "资管", "期货")) or (
+        "基金" in text_clean and "银行" not in text_clean
+    ):
+        inst_type = "基金/资管"
     elif "证券" in text_clean or any(k in text_clean for k in BROKER_KEYWORDS) or "SECURITIES" in upper_raw:
         inst_type = "券商"
     elif "信托" in text_clean or "TRUST" in upper_raw:
         inst_type = "信托"
-    elif any(k in text_clean for k in ("基金", "资产管理", "资管", "期货")):
-        inst_type = "基金/资管"
     elif (
-        any(k in text_clean for k in ("银行", "农商行", "信用社", "信用联社", "农信", "行"))
+        any(k in text_clean for k in ("银行", "农商行", "商行", "信用社", "信用联社", "农信"))
         or any(text_clean.startswith(a) for a in BANK_ALIAS_MAP)
         or any(eb in upper_raw for eb in ("BANK", "BNP PARIBAS", "HSBC", "CITIBANK", "JPMORGAN", "STANDARD CHARTERED", "DBS", "OCBC", "UOB"))
     ):
         inst_type = "银行"
 
-    # 若是英文外资银行名称，保留英文单词空格便于阅读
+    # 若是英文外资银行名称，保留英文单词空格便于阅读并规整常见断词/分行
     if inst_type == "银行" and re.search(r"[A-Za-z]{4,}", upper_raw) and not re.search(r"[\u4e00-\u9fff]{2,}", text_clean):
         en_name = clean_keep_spaces(raw)
+        en_name = re.sub(r"Internation\s+al", "International", en_name, flags=re.I)
+        en_name = re.sub(r"HongKong", "Hong Kong", en_name, flags=re.I)
+        en_name = re.sub(r"\(Wealth Management\)", "", en_name, flags=re.I).strip()
         br = "未披露"
-        m_en = re.search(r"([A-Za-z\s]+BRANCH|HONG KONG|SINGAPORE|NEW YORK)$", en_name, re.I)
+        m_en = re.search(r"([A-Za-z\s]+BRANCH|HONG KONG|HONG|SINGAPORE|NEW YORK)$", en_name, re.I)
         if m_en and len(en_name) > len(m_en.group(1)) + 4:
             br = m_en.group(1).strip(" ,-")
+            if br.upper() == "HONG":
+                br = "Hong Kong"
             en_name = en_name[: m_en.start()].strip(" ,-")
         return ("银行", en_name, br)
 
@@ -196,9 +213,10 @@ def normalize_institution(raw: str, body_text: str = "") -> Tuple[str, str, str]
                             "系列", "挂钩", "财富", "添利", "智信", "金芙蓉", "保本", "浮动", "通知",
                             "协定", "定期", "对公", "企业金融", "单位", "人民币", "看涨", "看跌",
                             "区间", "凭证", "计划", "基金", "信托", "代码", "编号", "类型", "金额",
-                            "期限", "利率", "：", ":", "“", "”",
+                            "期限", "利率", "金融机构", "其他", "/", "：", ":", "“", "”",
                         )
                     )
+                    and not rest.startswith(("及", "/"))
                     and not re.search(r"\d{2,}|[（(][一二三四五六七八九十\d]+[）)]", rest)
                 ):
                     branch = rest
@@ -210,7 +228,7 @@ def normalize_institution(raw: str, body_text: str = "") -> Tuple[str, str, str]
                 if text_clean.startswith(alias):
                     main = full_name
                     rest = text_clean[len(alias):].strip(" -—、（）()")
-                    if rest:
+                    if rest and re.search(r"(?:分行营业部|支行营业部|分行|支行|营业部|营业室|分理处|网点|中心)$", rest):
                         branch = rest
                     break
 
@@ -255,17 +273,28 @@ def normalize_institution(raw: str, body_text: str = "") -> Tuple[str, str, str]
     elif inst_type == "信托":
         # 避免把“中信信托启元1号财富管理服务信托”整串产品名当机构名
         m = re.search(r"([\u4e00-\u9fa5]{2,10}信托)", text_clean)
-        main = m.group(1) if m else re.sub(r"(?:有限责任公司|股份有限公司|有限公司)$", "", text_clean)
+        cand = m.group(1) if m else re.sub(r"(?:有限责任公司|股份有限公司|有限公司)$", "", text_clean)
+        main = "" if cand.startswith("号") else cand
 
     elif inst_type == "基金/资管":
-        m = re.search(r"([\u4e00-\u9fa5]{2,10}(?:基金|资管|资产管理|期货))", text_clean)
-        main = m.group(1) if m else re.sub(r"(?:有限责任公司|股份有限公司|有限公司)$", "", text_clean)
+        m = re.search(r"([\u4e00-\u9fa5]{2,10}(?:基金|资管|资产管理|资本管理|期货))", text_clean)
+        cand = m.group(1) if m else re.sub(r"(?:有限责任公司|股份有限公司|有限公司)$", "", text_clean)
+        main = "" if cand.startswith("号") else cand
 
     else:
         main = re.sub(r"(?:股份有限公司|有限责任公司|有限公司)$", "", text_clean)
 
-    # 拦截明显非机构的脏值（纯数字、百分比、过短泛称）
-    if re.search(r"^\d|%", main) or main in ("银行", "商业银行", "证券", "理财", "信托", "基金", "资管", "机构"):
+    # 拦截明显非机构的脏值（纯数字、百分比、过短泛称、通用类目）
+    if (
+        not main
+        or re.search(r"^\d|%", main)
+        or main.startswith(("号", "——", "--"))
+        or main in (
+            "银行", "商业银行", "大型商业银行", "国内大型商业银行", "国有大型商业银行", "股份制商业银行",
+            "证券", "理财", "信托", "基金", "资管", "机构", "金融机构", "金融机构理财", "合格专业机构",
+            "公司", "交易所产品", "人民币结构性存款",
+        )
+    ):
         return ("其他", "未披露", "未披露")
 
     # 3. 如果表格中未披露分行，尝试从公告正文中反查该银行的唯一分支行
@@ -360,7 +389,7 @@ def parse_amount_wan(val_raw: str, header_raw: str = "", table_unit_hint: str = 
     combined_unit = f"{raw}|{header_raw or ''}|{table_unit_hint or ''}"
     upper_u = combined_unit.upper()
     currency = "人民币"
-    if "印尼" in combined_unit or "卢比" in combined_unit or "IDR" in upper_u:
+    if "印尼" in combined_unit or "卢比" in combined_unit or "IDR" in upper_u or re.search(r"[万亿]\s*印(?:$|[^\u4e00-\u9fa5])", raw):
         currency = "印尼盾"
     elif "越南" in combined_unit or "VND" in upper_u:
         currency = "越南盾"

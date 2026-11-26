@@ -262,8 +262,9 @@ def build_excel_workbook(
 
 def export_excel_to_file(output_path: Optional[Path] = None, db_path: Path = DB_PATH) -> Path:
     if output_path is None:
-        today_tag = date.today().strftime("%Y%m%d")
-        output_path = OUTPUT_DIR / f"A股现金管理近3个月汇总_{today_tag}.xlsx"
+        today = date.today()
+        today_tag = today.strftime("%Y%m%d")
+        output_path = OUTPUT_DIR / f"A股现金管理{today.year}年汇总_{today_tag}.xlsx"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb = build_excel_workbook(include_extra_sheets=True, db_path=db_path)
     wb.save(output_path)

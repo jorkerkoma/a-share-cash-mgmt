@@ -201,7 +201,7 @@ def fetch_announcement_list(
     sess = session or create_cninfo_session()
     seen: Dict[str, Dict] = {}
 
-    chunks = _date_chunks(date_from, date_to, chunk_days=31)
+    chunks = _date_chunks(date_from, date_to, chunk_days=20)
     for kw in keywords:
         for c_start, c_end in chunks:
             se_date = f"{c_start}~{c_end}"

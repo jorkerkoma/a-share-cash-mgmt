@@ -719,7 +719,7 @@ def get_filter_options(filters: Optional[Dict[str, Any]] = None, db_path: Path =
             "cities": [
                 {"name": r[0], "province": r[1], "count": r[2]}
                 for r in conn.execute(
-                    f"SELECT city, MAX(province), COUNT(*) c FROM records {city_where} GROUP BY city ORDER BY c DESC LIMIT 200",
+                    f"SELECT city, MAX(province), COUNT(*) c FROM records {city_where} GROUP BY city ORDER BY c DESC LIMIT 400",
                     c_params,
                 ).fetchall()
             ],
@@ -732,7 +732,7 @@ def get_filter_options(filters: Optional[Dict[str, Any]] = None, db_path: Path =
                     {inst_where}
                     GROUP BY institution_main
                     ORDER BY c DESC
-                    LIMIT 300
+                    LIMIT 600
                     """,
                     params,
                 ).fetchall()

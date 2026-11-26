@@ -79,7 +79,7 @@ def build_static_site(db_path: Path = DB_PATH) -> dict:
 
     # 2. 导出 meta.json（公告解析统计、上次同步时间、待复核清单）
     ov = get_overview_stats(db_path=db_path)
-    rev = get_review_queue(page=1, page_size=500, db_path=db_path)
+    rev = get_review_queue(page=1, page_size=2000, db_path=db_path)
     meta_payload = {
         "generated_at": bj_now.strftime("%Y-%m-%d %H:%M"),
         "today": bj_today,
@@ -106,10 +106,12 @@ def build_static_site(db_path: Path = DB_PATH) -> dict:
         encoding="utf-8",
     )
 
-    # 3. 同步生成全量5页样式化 Excel 供云端直接下载
-    xlsx_path = DIST_DATA_DIR / "A股现金管理汇总.xlsx"
+    # 3. 同步生成全量5页样式化 Excel 供云端直接下载（仅保留单份 all.xlsx 减少仓库体积）
+    xlsx_path = DIST_DATA_DIR / "all.xlsx"
     export_excel_to_file(output_path=xlsx_path, db_path=db_path)
-    shutil.copyfile(xlsx_path, DIST_DATA_DIR / "all.xlsx")
+    old_cn_xlsx = DIST_DATA_DIR / "A股现金管理汇总.xlsx"
+    if old_cn_xlsx.exists():
+        old_cn_xlsx.unlink()
 
     # 4. 生成静态版 dist/index.html（注入静态模式标记 + 防缓存版本号）
     html = (WEB_DIR / "index.html").read_text(encoding="utf-8")
