@@ -732,7 +732,7 @@ def get_filter_options(filters: Optional[Dict[str, Any]] = None, db_path: Path =
                     {inst_where}
                     GROUP BY institution_main
                     ORDER BY c DESC
-                    LIMIT 600
+                    LIMIT 1000
                     """,
                     params,
                 ).fetchall()

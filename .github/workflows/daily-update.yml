@@ -39,6 +39,12 @@ jobs:
       - name: 安装依赖
         run: pip install -r requirements.txt
 
+      - name: 解压历史压缩数据库（如存在）
+        run: |
+          if [ -f data/cash_mgmt.db.gz ]; then
+            gunzip -kf data/cash_mgmt.db.gz
+          fi
+
       - name: 在线增量同步最新公告（PDF内存解析不落盘）
         run: |
           DAYS="${{ github.event.inputs.days || '5' }}"
@@ -47,11 +53,39 @@ jobs:
       - name: 打包生成纯静态云端站点与全量Excel（dist/）
         run: python build_static.py
 
-      - name: 提交更新后的数据库与静态文件（触发 EdgeOne / Cloudflare 自动发布）
+      - name: 无损压缩历史数据库（保持仓库长期轻量化）
+        run: |
+          python - <<'PYEOF'
+          import gzip
+          import sqlite3
+
+          conn = sqlite3.connect("data/cash_mgmt.db")
+          idxs = [
+              r[0]
+              for r in conn.execute(
+                  "SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL"
+              ).fetchall()
+          ]
+          for idx in idxs:
+              conn.execute(f'DROP INDEX IF EXISTS "{idx}"')
+          conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+          conn.execute("PRAGMA journal_mode=DELETE;")
+          conn.execute("VACUUM;")
+          conn.close()
+
+          with open("data/cash_mgmt.db", "rb") as fi, gzip.open(
+              "data/cash_mgmt.db.gz", "wb", compresslevel=9
+          ) as fo:
+              fo.write(fi.read())
+          PYEOF
+          rm -f data/cash_mgmt.db data/cash_mgmt.db-wal data/cash_mgmt.db-shm
+
+      - name: 提交更新后的压缩数据库与静态文件（触发 EdgeOne / Cloudflare / Netlify 实时生效）
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/cash_mgmt.db dist/
+          git rm -f --ignore-unmatch data/cash_mgmt.db
+          git add data/cash_mgmt.db.gz dist/
           if git diff --cached --quiet; then
             echo "今日暂无新增变化，跳过提交。"
           else

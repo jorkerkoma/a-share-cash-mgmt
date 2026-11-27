@@ -262,9 +262,18 @@ def build_excel_workbook(
 
 def export_excel_to_file(output_path: Optional[Path] = None, db_path: Path = DB_PATH) -> Path:
     if output_path is None:
+        from app.db import get_conn
         today = date.today()
         today_tag = today.strftime("%Y%m%d")
-        output_path = OUTPUT_DIR / f"A股现金管理{today.year}年汇总_{today_tag}.xlsx"
+        year_tag = f"{today.year}年"
+        try:
+            with get_conn(db_path) as conn:
+                row = conn.execute("SELECT MIN(SUBSTR(announce_date,1,4)), MAX(SUBSTR(announce_date,1,4)) FROM records").fetchone()
+                if row and row[0] and row[1]:
+                    year_tag = f"{row[0]}-{row[1]}年" if row[0] != row[1] else f"{row[0]}年"
+        except Exception:
+            pass
+        output_path = OUTPUT_DIR / f"A股现金管理{year_tag}汇总_{today_tag}.xlsx"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wb = build_excel_workbook(include_extra_sheets=True, db_path=db_path)
     wb.save(output_path)

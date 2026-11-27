@@ -633,9 +633,13 @@ def _try_parse_kv_table(
 
     if not inst_raw or not amt_raw:
         return []
+    if any(k in amt_raw for k in ("不超过", "最高余额", "余额上限")):
+        return []
+    if any(k in inst_raw for k in ("大型商业银行", "股份制商业银行", "及其他金融机构", "合格专业机构")):
+        return []
 
     amount_wan, currency = parse_amount_wan(amt_raw, f"{amt_k} {curr_raw}")
-    if amount_wan is None:
+    if amount_wan is None or amount_wan <= 0:
         return []
 
     inst_type, inst_main, branch_name = normalize_institution(inst_raw, full_text)
@@ -749,10 +753,25 @@ def _rows_to_records(
         inst_raw = get_cell(row, "institution")
         prod_name = get_cell(row, "product_name")
         prod_type_raw = get_cell(row, "product_type")
-        amt_raw = get_cell(row, "amount") or get_cell(row, "redeem_amount")
-        if record_type == "到期赎回" and get_cell(row, "redeem_amount"):
-            amt_raw = get_cell(row, "redeem_amount") or amt_raw
-        amt_hdr = get_hdr("amount") if get_cell(row, "amount") else get_hdr("redeem_amount")
+        amt_cell = get_cell(row, "amount")
+        red_cell = get_cell(row, "redeem_amount")
+        red_hdr = get_hdr("redeem_amount")
+        # 到期赎回表优先用赎回本金列；但如果该列是“赎回本金及利息（元）”等本息合计数且已存在本金列，则保留本金列；
+        # 无论选中哪一列，amt_hdr 必须严格对应同一列的表头，杜绝把“元”列错配给“万元”表头！
+        use_redeem_col = (
+            (not amt_cell and bool(red_cell))
+            or (
+                record_type == "到期赎回"
+                and bool(red_cell)
+                and not (amt_cell and any(k in red_hdr for k in ("利息", "收益", "本息")))
+            )
+        )
+        if use_redeem_col:
+            amt_raw = red_cell
+            amt_hdr = red_hdr
+        else:
+            amt_raw = amt_cell
+            amt_hdr = get_hdr("amount")
         income_raw = get_cell(row, "actual_income")
         income_hdr = get_hdr("actual_income")
         yield_raw = get_cell(row, "yield_rate")
@@ -782,6 +801,13 @@ def _rows_to_records(
             fund_raw = last_fund_source
         elif fund_raw:
             last_fund_source = fund_raw
+
+        # 纠偏 PyMuPDF 偶发列粘连：起息日年份前缀“20”粘进金额列左侧（如“203,000” + “25年5月12日”或“725年5月...”）
+        amt_clean_chk = clean_text(amt_raw)
+        if re.fullmatch(r"20\d,\d{3}(?:\.\d+)?", amt_clean_chk) and re.search(
+            r"(?<!20)2[3-7]年", f"{start_raw}{end_raw}{range_raw}"
+        ):
+            amt_raw = amt_clean_chk[2:]
 
         amount_wan, currency = parse_amount_wan(amt_raw, amt_hdr, unit_hint)
         # 严控碎片行、0元错位行，以及额度计划表中的“不超过XX亿元/最高余额上限”计划行
@@ -834,6 +860,20 @@ def _rows_to_records(
                         pass
             if not in_window:
                 continue
+            # 过滤 12 个月滚动汇总表中的“年度累计发生额汇总行”（如跨度>=300天的国债逆回购/现金管理滚动汇总行）
+            if start_iso and end_iso:
+                try:
+                    span_days = (
+                        datetime.strptime(end_iso, "%Y-%m-%d").date()
+                        - datetime.strptime(start_iso, "%Y-%m-%d").date()
+                    ).days
+                    if span_days >= 300 and (
+                        amount_wan >= 200000
+                        or any(k in f"{prod_name}{prod_type_raw}" for k in ("国债逆回购", "逆回购", "时时付"))
+                    ):
+                        continue
+                except ValueError:
+                    pass
             if any(k in redeemed_flag for k in ("是", "已到期", "已赎回", "全部收回", "收回", "到期")) or income_raw:
                 row_rec_type = "到期赎回"
             else:
@@ -1030,7 +1070,15 @@ def _extract_from_prose(ann: Dict[str, Any], company_name: str, full_text: str) 
         span_start = max(0, ms - 40)
         span_end = min(len(clean_body), me + 260)
         snippet = clean_body[span_start:span_end]
-        if any(q in snippet[:120] for q in ("不超过", "额度", "拟使用", "授权", "审议通过", "最高额")):
+        if any(
+            q in snippet[:120]
+            for q in (
+                "不超过", "额度", "拟使用", "授权", "审议通过", "最高额",
+                "累计", "十二个月", "12个月", "截至本公告", "尚未到期", "未到期余额", "单日最高",
+            )
+        ):
+            continue
+        if any(bad in inst_raw for bad in ("累计", "个月", "募集资金", "自有资金", "购买理财", "闲置", "网上银行")):
             continue
         amount_wan, currency = parse_amount_wan(amt_raw)
         if amount_wan is None or amount_wan <= 0:

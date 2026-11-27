@@ -129,14 +129,30 @@ def normalize_institution(raw: str, body_text: str = "") -> Tuple[str, str, str]
     # 去掉“（以下简称...）”
     text_clean = re.sub(r"[（(]以下简称[^）)]*[）)]", "", text_clean)
 
-    # 修正公告原文常见银行笔误
+    # 修正公告原文常见银行笔误及列粘连脏字符
     text_clean = text_clean.replace("中国建行股份股份有限公司", "中国建设银行股份有限公司")
     text_clean = text_clean.replace("中国建行股份有限公司", "中国建设银行股份有限公司")
     text_clean = text_clean.replace("中国农行股份有限公司", "中国农业银行股份有限公司")
     text_clean = text_clean.replace("中国农业银河股份有限公司", "中国农业银行股份有限公司")
+    text_clean = re.sub(r"^单(?=中国(?:建设|工商|农业|邮政储蓄)?银行)", "", text_clean)
+    text_clean = text_clean.replace("股结份有限公司", "股份有限公司")
+
+    # 规整常见外资/中英文混排银行名称
+    raw_sp = clean_keep_spaces(raw)
+    upper_raw = raw_sp.upper()
+    en_bank_norm = [
+        (r"CHINA\s*MERCHANTS\s*BANK", "招商银行"),
+        (r"J\.?\s*P\.?\s*MORGAN\s*CHASE\s*BANK|JPMORGAN\s*CHASE\s*BANK", "摩根大通银行"),
+        (r"THE\s*HONG\s*KONG\s*AND\s*SHANGHAI\s*BANKING|THEHONGKONGANDSHANGHAIBANKING|HK\s+AND\s+SHANGHAI\s+BANKING", "汇丰银行"),
+        (r"CHINA\s*CIT[IL]C\s*BANK\s*INTERNATION\s*AL", "中信银行（国际）"),
+    ]
+    for pat_eb, std_eb in en_bank_norm:
+        if re.search(pat_eb, upper_raw):
+            return ("银行", std_eb, "未披露")
+    if "华泰国际金融产品" in text_clean:
+        return ("券商", "华泰国际", "未披露")
 
     # 1. 判断机构类型（兼容中文及常见外资银行英文名）
-    upper_raw = clean_keep_spaces(raw).upper()
     inst_type = "其他"
     if any(k in text_clean for k in WEALTH_SUB_KEYWORDS) or (
         "理财" in text_clean
@@ -284,13 +300,17 @@ def normalize_institution(raw: str, body_text: str = "") -> Tuple[str, str, str]
     else:
         main = re.sub(r"(?:股份有限公司|有限责任公司|有限公司)$", "", text_clean)
 
-    # 拦截明显非机构的脏值（纯数字、百分比、过短泛称、通用类目）
+    # 拦截明显非机构的脏值（纯数字、百分比、过短泛称、通用类目、产品类型错入受托方）
     if (
         not main
         or re.search(r"^\d|%", main)
         or main.startswith(("号", "——", "--"))
+        or any(
+            bad in main
+            for bad in ("大额存单", "固定收益类", "结构性存款", "累计购买", "十二个月", "募集资金", "自有资金", "网上银行")
+        )
         or main in (
-            "银行", "商业银行", "大型商业银行", "国内大型商业银行", "国有大型商业银行", "股份制商业银行",
+            "银行", "商业银行", "托商业银行", "大型商业银行", "国内大型商业银行", "国有大型商业银行", "股份制商业银行",
             "证券", "理财", "信托", "基金", "资管", "机构", "金融机构", "金融机构理财", "合格专业机构",
             "公司", "交易所产品", "人民币结构性存款",
         )
@@ -303,6 +323,8 @@ def normalize_institution(raw: str, body_text: str = "") -> Tuple[str, str, str]
         if branch_found:
             branch = branch_found
 
+    if branch and branch != "未披露":
+        branch = re.sub(r"(?:股份有限公司|有限责任公司|有限公司)", "", branch).strip(" -—、，,（）()")
     if not branch or branch in ("总行", "公司", "有限公司", "股份有限公司"):
         branch = "未披露"
 
@@ -438,13 +460,15 @@ def parse_amount_wan(val_raw: str, header_raw: str = "", table_unit_hint: str = 
         unit = "yi"
     elif re.search(r"万", header_raw or ""):
         unit = "wan"
-    elif re.search(r"[（(]\s*(?:人民币)?元\s*[）)]|单位[：:]\s*元|金额[（(]元[）)]", header_raw or ""):
+    elif re.search(r"[（(]\s*(?:人民币[：:]?\s*)?元\s*[）)]|单位[：:]\s*(?:人民币)?元|金额[（(]元[）)]", header_raw or ""):
         unit = "yuan"
     elif re.search(r"亿", table_unit_hint or ""):
         unit = "yi"
     elif re.search(r"万", table_unit_hint or ""):
         unit = "wan"
     elif re.search(r"元", table_unit_hint or ""):
+        unit = "yuan"
+    elif re.match(r"^[￥¥]", raw) and abs(num) >= 100_000:
         unit = "yuan"
 
     if unit == "yi":
