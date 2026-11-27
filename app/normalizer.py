@@ -675,7 +675,7 @@ def estimate_end_date(start_iso: str, term_raw: str) -> str:
         return ""
 
     t = clean_text(term_raw)
-    m_day = re.search(r"(\d+)\s*[天日]", t)
+    m_day = re.search(r"(\d+)\s*(?:个?(?:自然|交易|工作)?)?[天日]", t)
     if m_day:
         days = int(m_day.group(1))
         if 1 <= days <= 3650:

@@ -71,6 +71,7 @@ SUMMARY_12M_REGEXES = (
     r"截至本公告.*(?:尚未到期|未到期|已到期|累计|前十二个月|最近十二个月|委托理财情况|现金管理情况)",
     r"尚未到期.*(?:理财|现金管理|存款)",
     r"未到期.*(?:理财|现金管理)",
+    r"(?:未到期|尚未到期)余额",
     r"自.*决议.*(?:已到期|尚未到期|累计)",
     r"(?:此前|前期|历史).*(?:未到期|已到期|购买.*汇总|现金管理汇总)",
 )
@@ -559,17 +560,32 @@ def _classify_table(
     if "unredeemed" in col_map and ("redeem_amount" in col_map or "actual_income" in col_map):
         return "summary_12m"
 
-    # 2. 判断是否为本次到期赎回表
-    above_clean = clean_text(context_above)
-    sec_clean = clean_text(section_heading)
-    buy_override_near = any(k in above_clean[-45:] for k in ("本次购买", "本次使用", "继续进行", "新购", "继续购买", "本次认购"))
+    # 2. 判断是否为本次到期赎回表（先剥离书名号内引用的历史公告标题，避免干扰本次章节判断）
+    above_clean = re.sub(r"《[^》]*》?", "", clean_text(context_above))
+    sec_clean = re.sub(r"《[^》]*》?", "", clean_text(section_heading))
+    buy_kws = (
+        "本次购买", "本次使用", "继续进行", "新购", "继续购买", "本次认购",
+        "继续委托", "购买理财产品情况", "购买银行理财", "购买现金管理",
+    )
+    redeem_tail = any(k in above_clean[-45:] for k in ("赎回情况如下", "具体赎回情况", "到期赎回情况", "到期收回情况"))
+    has_explicit_actual_income = any(
+        any(k in clean_text(h) for k in ("实际收益", "实际获得收益", "已获收益", "实现收益"))
+        for h in header
+    )
+    buy_override_near = (not redeem_tail) and (
+        any(k in above_clean[-60:] for k in buy_kws) or any(k in sec_clean for k in buy_kws)
+    )
+    if redeem_tail or has_explicit_actual_income:
+        return "redeem"
     if any(re.search(h, above_clean) for h in REDEEM_SECTION_HINTS) and not buy_override_near:
         return "redeem"
-    if "redeem_amount" in col_map or "actual_income" in col_map or "actual_yield" in col_map:
+    if ("redeem_amount" in col_map or "actual_income" in col_map or "actual_yield" in col_map) and not (
+        buy_override_near and "redeem_amount" not in col_map and "actual_yield" not in col_map
+    ):
         return "redeem"
     if any(re.search(h, sec_clean) for h in REDEEM_SECTION_HINTS) and not buy_override_near:
         return "redeem"
-    if ann_category == "到期赎回" and not any(k in f"{sec_clean}{above_clean}" for k in ("继续购买", "本次购买", "新购", "继续进行")):
+    if ann_category == "到期赎回" and not any(k in f"{sec_clean}{above_clean}" for k in buy_kws):
         return "redeem"
 
     return "buy"
@@ -612,8 +628,10 @@ def _try_parse_kv_table(
     if any(bad in "".join(kv.keys()) for bad in ("募集资金总额", "募集资金净额", "发行名称", "保荐机构")):
         return []
 
-    def find_val(keywords: Tuple[str, ...]) -> Tuple[str, str]:
+    def find_val(keywords: Tuple[str, ...], exclude: Tuple[str, ...] = ()) -> Tuple[str, str]:
         for k, v in kv.items():
+            if exclude and any(ex in k for ex in exclude):
+                continue
             if any(w in k for w in keywords):
                 return (k, v)
         return ("", "")
@@ -628,7 +646,7 @@ def _try_parse_kv_table(
     _, end_raw = find_val(("到期日", "到息日", "终止日", "赎回日", "投资到期"))
     _, term_raw = find_val(("产品期限", "投资期限", "理财期限", "理财天数", "期限"))
     _, fund_raw = find_val(("资金来源", "资金性质"))
-    inc_k, inc_raw = find_val(("实际收益", "获得收益", "投资收益"))
+    inc_k, inc_raw = find_val(("实际收益", "获得收益", "已获收益", "实现收益", "投资收益"), exclude=("预计", "预期", "参考"))
     _, entr_raw = find_val(("委托方", "购买方", "实施主体"))
 
     if not inst_raw or not amt_raw:
@@ -653,8 +671,36 @@ def _try_parse_kv_table(
             if not e_disp:
                 e_disp = f"{est}(按{term_raw}推算)"
 
-    rec_type = "到期赎回" if (inc_raw or any(re.search(h, clean_text(table.section_heading)) for h in REDEEM_SECTION_HINTS)) else "本次新购"
-    income_wan = parse_income_wan(inc_raw, inc_k, amount_wan) if inc_raw else None
+    inc_not_matured = any(k in (inc_raw or "") for k in ("未到期", "尚未", "未赎回", "存续"))
+    income_wan = None if inc_not_matured else (parse_income_wan(inc_raw, inc_k, amount_wan) if inc_raw else None)
+    sec_ctx = clean_text(f"{table.section_heading}{table.context_above[-60:]}")
+    kv_buy_override = any(k in sec_ctx for k in ("本次购买", "继续购买", "继续进行", "基本情况", "购买了", "认购了"))
+    rec_type = (
+        "到期赎回"
+        if (income_wan is not None or (not kv_buy_override and any(re.search(h, clean_text(table.section_heading)) for h in REDEEM_SECTION_HINTS)))
+        else "本次新购"
+    )
+    # 日期一致性护栏：若到期日晚于公告日，除非是明确的提前赎回（有实际收益且持有>=15天或明确含“提前”），否则必为本次新购
+    ann_date_str = ann.get("announce_date", "")
+    if rec_type == "到期赎回" and (inc_not_matured or (e_iso and ann_date_str and e_iso > ann_date_str)):
+        is_early = False
+        if not inc_not_matured and income_wan is not None:
+            has_early_kw = "提前" in f"{ann.get('title', '')}{table.section_heading}{table.context_above}"
+            held_days = None
+            if s_iso and ann_date_str:
+                try:
+                    held_days = (
+                        datetime.strptime(ann_date_str, "%Y-%m-%d").date()
+                        - datetime.strptime(s_iso, "%Y-%m-%d").date()
+                    ).days
+                except ValueError:
+                    pass
+            if has_early_kw or (held_days is not None and held_days >= 15):
+                is_early = True
+        if not is_early:
+            rec_type = "本次新购"
+            if e_iso and ann_date_str and e_iso > ann_date_str:
+                income_wan = None
 
     rec: Dict[str, Any] = {
         "announcement_id": ann["announcement_id"],
@@ -847,6 +893,21 @@ def _rows_to_records(
                     tag = f"按{term_raw}推算" if start_iso else f"约{est_iso}({term_raw})"
                     end_disp = f"{est_iso}({tag})" if start_iso else tag
 
+        y_disp, y_min, y_max = parse_yield_rate(yield_raw)
+        _, ay_min, ay_max = parse_yield_rate(actual_yield_raw)
+        actual_yield_pct = ay_max if ay_max is not None else ay_min
+        if not y_disp and actual_yield_raw:
+            y_disp, y_min, y_max = parse_yield_rate(actual_yield_raw)
+
+        row_not_matured = any(k in (income_raw or "") for k in ("未到期", "尚未到期", "未赎回", "尚未收回", "存续")) or any(
+            k in (redeemed_flag or "") for k in ("未到期", "尚未到期", "未赎回", "否")
+        )
+        actual_income_wan = (
+            None
+            if row_not_matured
+            else (parse_income_wan(income_raw, income_hdr, amount_wan, unit_hint) if income_raw else None)
+        )
+
         if only_recent_window:
             ann_dt = datetime.strptime(ann["announce_date"], "%Y-%m-%d").date()
             in_window = False
@@ -874,20 +935,64 @@ def _rows_to_records(
                         continue
                 except ValueError:
                     pass
-            if any(k in redeemed_flag for k in ("是", "已到期", "已赎回", "全部收回", "收回", "到期")) or income_raw:
+            if (
+                not row_not_matured
+                and (
+                    any(k in redeemed_flag for k in ("是", "已到期", "已赎回", "全部收回", "收回", "到期"))
+                    or actual_income_wan is not None
+                )
+            ):
                 row_rec_type = "到期赎回"
             else:
                 row_rec_type = "本次新购"
         else:
             row_rec_type = record_type
 
-        y_disp, y_min, y_max = parse_yield_rate(yield_raw)
-        _, ay_min, ay_max = parse_yield_rate(actual_yield_raw)
-        actual_yield_pct = ay_max if ay_max is not None else ay_min
-        if not y_disp and actual_yield_raw:
-            y_disp, y_min, y_max = parse_yield_rate(actual_yield_raw)
-
-        actual_income_wan = parse_income_wan(income_raw, income_hdr, amount_wan, unit_hint) if income_raw else None
+        # 通用行级日期一致性护栏：
+        # 1) 原文明确标注“未到期/未赎回”的行绝不能归类为到期赎回
+        # 2) 到期日严格晚于公告日的行，除非是明确的提前赎回（有实际收益且持有>=15天或明确含“提前”字样，或赎回类公告缺起息日但披露了实际收益），否则纠偏为“本次新购”
+        ann_date_str = ann.get("announce_date", "")
+        if row_rec_type == "到期赎回":
+            if row_not_matured:
+                row_rec_type = "本次新购"
+            elif end_iso and ann_date_str and end_iso > ann_date_str:
+                is_early_redeem = False
+                if actual_income_wan is not None:
+                    ctx_all = f"{ann.get('title', '')}{table.section_heading}{table.context_above}"
+                    has_early_kw = "提前" in ctx_all
+                    held_days = None
+                    if start_iso:
+                        try:
+                            held_days = (
+                                datetime.strptime(ann_date_str, "%Y-%m-%d").date()
+                                - datetime.strptime(start_iso, "%Y-%m-%d").date()
+                            ).days
+                        except ValueError:
+                            pass
+                    if (
+                        has_early_kw
+                        or (held_days is not None and held_days >= 15)
+                        or (
+                            held_days is None
+                            and any(k in f"{ann.get('title', '')}{table.section_heading}" for k in ("赎回", "收回", "兑付"))
+                        )
+                    ):
+                        is_early_redeem = True
+                if not is_early_redeem:
+                    row_rec_type = "本次新购"
+                    # 若原本因为旧版表头误把预计收益金额读进了 actual_income_wan，一并清空
+                    if actual_income_wan is not None and "提前" not in f"{ann.get('title', '')}{table.section_heading}":
+                        actual_income_wan = None
+            elif not end_iso and start_iso and ann_date_str and actual_income_wan is None:
+                try:
+                    held_days = (
+                        datetime.strptime(ann_date_str, "%Y-%m-%d").date()
+                        - datetime.strptime(start_iso, "%Y-%m-%d").date()
+                    ).days
+                    if held_days <= 3 and not any(k in table.section_heading for k in ("赎回", "收回", "兑付")):
+                        row_rec_type = "本次新购"
+                except ValueError:
+                    pass
 
         inst_type, inst_main, branch_name = normalize_institution(inst_raw, full_text)
         # 仅当受托方列缺失且产品名中明确含真实银行/券商/理财子名或专属系列品牌时才兜底，绝不把产品名当作机构名
