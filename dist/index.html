@@ -313,7 +313,10 @@
   }
   .click-link { color: var(--navy); font-weight: 600; cursor: pointer; }
   .click-link:hover { color: var(--primary); text-decoration: underline; }
-  .sub-meta { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+  .comp-col { min-width: 168px; }
+  .comp-short { font-size: 13.5px; font-weight: 700; line-height: 1.3; display: inline-block; }
+  .comp-full-sub { display: block; font-size: 11px; color: #475569; font-weight: 400; line-height: 1.35; margin-top: 2px; }
+  .sub-meta { display: block; font-size: 11px; color: var(--muted); font-weight: 400; line-height: 1.35; }
 
   /* Mobile Card List (shown on <= 768px) */
   .mobile-cards { display: none; flex-direction: column; gap: 10px; }
@@ -464,7 +467,7 @@
     .pager { justify-content: flex-start; }
   }
 </style>
-<script>window.__STATIC_MODE__ = true; window.__DATA_VER__ = "202611281028";</script>
+<script>window.__STATIC_MODE__ = true; window.__DATA_VER__ = "202611281054";</script>
 </head>
 <body>
 
@@ -1724,9 +1727,12 @@ document.addEventListener('click', (e) => {
 function renderTableRowsHtml(items, startIdx = 0) {
   return items.map((it, idx) => {
     const rankNum = startIdx + idx + 1;
-    const subComp = it.entrusting_party && it.entrusting_party !== it.company_name
-      ? `<span class="sub-meta">${esc(it.sec_code)} ${esc(it.sec_name)} · 委托方:${esc(it.entrusting_party)}</span>`
-      : `<span class="sub-meta">${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>`;
+    const shortName = it.sec_name || it.company_name || '-';
+    const fullName = it.company_name || '';
+    const codeMeta = it.entrusting_party && it.entrusting_party !== it.company_name
+      ? `${esc(it.sec_code)} · ${esc(it.market)} · 委托方:${esc(it.entrusting_party)}`
+      : `${esc(it.sec_code)} · ${esc(it.market)}`;
+    const subComp = `${fullName && fullName !== shortName ? `<span class="comp-full-sub" title="${esc(fullName)}">${esc(fullName)}</span>` : ''}<span class="sub-meta">${codeMeta}</span>`;
     const prov = it.province || '';
     const city = (it.city && it.city !== '其他/未注明') ? it.city : '';
     const isMuni = prov && city && city.startsWith(prov);
@@ -1755,13 +1761,13 @@ function renderTableRowsHtml(items, startIdx = 0) {
     const isFollowed = Boolean(it.sec_code && state.followedCodes.has(it.sec_code));
     return `<tr>
       <td class="ctr rank-col">${rankNum}</td>
-      <td>
+      <td class="comp-col">
         <div class="comp-cell-row">
           <div class="comp-cell-main">
-            <span class="click-link" title="${esc(it.company_name)}" onclick="quickFilterCompany('${esc(it.sec_name)}')">${esc(it.company_name)}</span>
+            <span class="click-link comp-short" title="${esc(fullName || shortName)}" onclick="quickFilterCompany('${esc(shortName)}')">${esc(shortName)}</span>
             ${subComp}
           </div>
-          <button type="button" class="heart-btn ${isFollowed ? 'active' : ''}" data-code="${esc(it.sec_code)}" data-name="${esc(it.sec_name || it.company_name)}" title="${isFollowed ? '点击取消关注' : '点击关注该上市公司'}" onclick="toggleFollowCompany(event, this)">${HEART_SVG}</button>
+          <button type="button" class="heart-btn ${isFollowed ? 'active' : ''}" data-code="${esc(it.sec_code)}" data-name="${esc(shortName)}" title="${isFollowed ? '点击取消关注' : '点击关注该上市公司'}" onclick="toggleFollowCompany(event, this)">${HEART_SVG}</button>
         </div>
       </td>
       <td class="ctr nowrap">${regionCell}</td>
@@ -1802,15 +1808,18 @@ function renderMobileCardsHtml(items, startIdx = 0) {
       ? `<div class="m-kv-full"><span class="m-k">实际获得收益</span><span class="m-v" style="color:#059669;">${fmtNum(it.actual_income_wan, 2)} 万${it.currency && it.currency !== '人民币' ? esc(it.currency) : '元'}</span></div>`
       : '';
     const isFollowed = Boolean(it.sec_code && state.followedCodes.has(it.sec_code));
+    const mShort = it.sec_name || it.company_name || '-';
+    const mFull = it.company_name && it.company_name !== mShort ? it.company_name : '';
     return `<div class="m-card">
       <div class="m-card-head">
         <div style="min-width:0;flex:1;">
           <div class="m-comp-title-row">
-            <div class="m-comp-name" onclick="quickFilterCompany('${esc(it.sec_name)}')"><span class="m-rank-tag">#${rankNum}</span>${esc(it.company_name)}</div>
-            <button type="button" class="heart-btn ${isFollowed ? 'active' : ''}" data-code="${esc(it.sec_code)}" data-name="${esc(it.sec_name || it.company_name)}" title="${isFollowed ? '点击取消关注' : '点击关注该上市公司'}" onclick="toggleFollowCompany(event, this)">${HEART_SVG}</button>
+            <div class="m-comp-name" onclick="quickFilterCompany('${esc(mShort)}')"><span class="m-rank-tag">#${rankNum}</span>${esc(mShort)}</div>
+            <button type="button" class="heart-btn ${isFollowed ? 'active' : ''}" data-code="${esc(it.sec_code)}" data-name="${esc(mShort)}" title="${isFollowed ? '点击取消关注' : '点击关注该上市公司'}" onclick="toggleFollowCompany(event, this)">${HEART_SVG}</button>
           </div>
+          ${mFull ? `<div class="comp-full-sub">${esc(mFull)}</div>` : ''}
           <div class="m-comp-sub">
-            <span>${esc(it.sec_code)} ${esc(it.sec_name)} · ${esc(it.market)}</span>
+            <span>${esc(it.sec_code)} · ${esc(it.market)}</span>
             ${regionText ? `<span class="m-region-chip" onclick="quickFilterRegion('${esc(prov)}','${esc(city)}')">${esc(regionText)}</span>` : ''}
           </div>
         </div>
@@ -2257,7 +2266,10 @@ async function loadCompanyRankings() {
       <td class="ctr"><strong>${i+1}</strong></td>
       <td>
         <div class="comp-cell-row">
-          <div class="comp-cell-main"><span class="click-link" onclick="quickFilterCompany('${esc(x.sec_name)}')">${esc(x.company_name)}</span> <span style="color:var(--muted);font-size:11.5px;">(${esc(x.sec_name)})</span></div>
+          <div class="comp-cell-main">
+            <span class="click-link comp-short" onclick="quickFilterCompany('${esc(x.sec_name)}')">${esc(x.sec_name || x.company_name)}</span>
+            ${x.company_name && x.company_name !== x.sec_name ? `<span class="comp-full-sub">${esc(x.company_name)}</span>` : ''}
+          </div>
           <button type="button" class="heart-btn ${isF ? 'active' : ''}" data-code="${esc(x.sec_code)}" data-name="${esc(x.sec_name || x.company_name)}" title="${isF ? '点击取消关注' : '点击关注该上市公司'}" onclick="toggleFollowCompany(event, this)">${HEART_SVG}</button>
         </div>
       </td>
@@ -2288,7 +2300,7 @@ async function loadReview(page = 1) {
   document.getElementById('reviewTbody').innerHTML = items.length ? items.map(x => `
     <tr>
       <td class="ctr nowrap">${esc(x.announce_date)}</td>
-      <td><strong>${esc(x.company_name || x.sec_name)}</strong><span class="sub-meta">${esc(x.sec_code)} ${esc(x.sec_name)}</span></td>
+      <td><strong class="comp-short">${esc(x.sec_name || x.company_name)}</strong>${x.company_name && x.company_name !== x.sec_name ? `<span class="comp-full-sub">${esc(x.company_name)}</span>` : ''}<span class="sub-meta">${esc(x.sec_code)}</span></td>
       <td class="ctr">${esc(x.market)}</td>
       <td>${esc(x.title)}</td>
       <td class="ctr"><span class="badge b-redeemed">${esc(x.parse_status)}</span></td>
