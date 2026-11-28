@@ -37,7 +37,7 @@ COLUMN_PATTERNS: List[Tuple[str, Tuple[str, ...]]] = [
     ("amount", ("认购金额", "购买金额", "投资金额", "委托金额", "理财金额", "产品金额", "本金", "存款金额", "现金管理金额", "交易金额", "发生额", "金额", "规模")),
     ("actual_yield", ("实际年化", "实际收益率", "实际利率")),
     ("yield_rate", ("年化收益率", "预计年收益率", "预期年化", "预计年化", "预期收益", "预计收益", "收益率", "年收益率", "年化利率", "利率", "业绩比较基准", "基准收益")),
-    ("start_date", ("起息日", "起始日", "开始日", "购买日", "认购日", "成立日", "存入日", "交易日", "委托理财起始", "生效日", "计息日", "投资起始")),
+    ("start_date", ("起息日", "起算日", "起始日", "开始日", "购买日", "认购日", "成立日", "存入日", "交易日", "买入日", "投资日期", "委托理财起始", "理财起始", "生效日", "协议生效", "计息日", "投资起始", "起息时间", "购买时间")),
     ("end_date", ("到期日", "到息日", "终止日", "结束日", "赎回日", "收回日", "到账日", "委托理财终止", "投资到期")),
     ("date_range", ("起止日", "起止时间", "投资期限", "理财期限", "产品期限", "存续期", "存款期限", "实际理财天数", "理财天数", "期限")),
     ("fund_source", ("资金来源", "资金类型", "资金性质")),
@@ -282,6 +282,14 @@ def _map_header_columns(header_cells: List[str]) -> Dict[str, int]:
     cleaned = [clean_text(h) for h in header_cells]
     for col_idx, h in enumerate(cleaned):
         if not h:
+            continue
+        # 若单列表头同时包含起止两类日期词（如“产品起始日-产品到期日”“起息日/到期日”“起息日至到期日”），直接映射为 date_range
+        if (
+            "date_range" not in mapping
+            and any(k in h for k in ("起始", "起息", "起算", "开始", "认购日", "购买日"))
+            and any(k in h for k in ("到期", "终止", "结束", "赎回日", "到息"))
+        ):
+            mapping["date_range"] = col_idx
             continue
         for field_name, keywords in COLUMN_PATTERNS:
             if field_name in mapping:
@@ -669,9 +677,10 @@ def _try_parse_kv_table(
     amt_k, amt_raw = find_val(("认购金额", "购买金额", "投资金额", "委托金额", "产品金额", "金额", "本金", "赎回金额"))
     _, curr_raw = find_val(("币种",))
     _, rate_raw = find_val(("年化收益率", "预计年收益率", "预期年化", "收益率", "年化利率"))
-    _, start_raw = find_val(("起息日", "起始日", "开始日", "购买日", "认购日", "投资起始"))
+    _, start_raw = find_val(("起息日", "起算日", "起始日", "开始日", "购买日", "认购日", "成立日", "存入日", "生效日", "投资起始"))
     _, end_raw = find_val(("到期日", "到息日", "终止日", "赎回日", "投资到期"))
-    _, term_raw = find_val(("产品期限", "投资期限", "理财期限", "理财天数", "期限"))
+    _, range_raw = find_val(("起止日", "起止时间", "起息日至到期日", "起始日-产品到期日", "存续期间"))
+    _, term_raw = find_val(("产品期限", "存款期限", "投资期限", "理财期限", "存续期", "理财天数", "期限"))
     _, fund_raw = find_val(("资金来源", "资金性质"))
     inc_k, inc_raw = find_val(("实际收益", "获得收益", "已获收益", "实现收益", "投资收益"), exclude=("预计", "预期", "参考"))
     _, entr_raw = find_val(("委托方", "购买方", "实施主体"))
@@ -689,14 +698,30 @@ def _try_parse_kv_table(
 
     inst_type, inst_main, branch_name = normalize_institution(inst_raw, full_text)
     y_disp, y_min, y_max = parse_yield_rate(rate_raw)
-    s_disp, s_iso = parse_single_date(start_raw)
-    e_disp, e_iso = parse_single_date(end_raw)
-    if not e_iso and s_iso and term_raw:
-        est = estimate_end_date(s_iso, term_raw)
+    s_disp, s_iso = "", ""
+    e_disp, e_iso = "", ""
+    # 若任一日期/期限字段里本身写的是完整日期区间（如 "2026年11月11日-2027年6月21日" 或 "2026.5.8-2026.5.31"），优先拆成起息日 + 到期日！
+    for cand_rng in (range_raw, start_raw, end_raw, term_raw):
+        if not cand_rng:
+            continue
+        r_s, r_e, r_e_iso, _ = parse_date_range(cand_rng)
+        if r_s and r_e_iso:
+            s_disp, s_iso = r_s, r_s
+            e_disp, e_iso = r_e, r_e_iso
+            if cand_rng == term_raw:
+                term_raw = ""
+            break
+    if not s_disp and start_raw:
+        s_disp, s_iso = parse_single_date(start_raw)
+    if not e_disp and end_raw:
+        e_disp, e_iso = parse_single_date(end_raw)
+    if not e_iso and term_raw:
+        base_dt = s_iso or ann.get("announce_date", "")
+        est = estimate_end_date(base_dt, term_raw)
         if est:
             e_iso = est
             if not e_disp:
-                e_disp = f"{est}(按{term_raw}推算)"
+                e_disp = f"{est}(按{term_raw}推算)" if s_iso else f"约{est}({term_raw})"
 
     inc_not_matured = any(k in (inc_raw or "") for k in ("未到期", "尚未", "未赎回", "存续"))
     income_wan = None if inc_not_matured else (parse_income_wan(inc_raw, inc_k, amount_wan) if inc_raw else None)
@@ -916,8 +941,20 @@ def _rows_to_records(
         if not prod_name and prod_type_raw:
             prod_name = prod_type_raw
 
-        start_disp, start_iso = parse_single_date(start_raw)
-        end_disp, end_iso = parse_single_date(end_raw)
+        start_disp, start_iso = "", ""
+        end_disp, end_iso = "", ""
+        # 若 start_raw 或 end_raw 单元格本身包含双日期区间（如 2026/11/11-2027/6/21），优先完整拆分
+        for cand_rng in (start_raw, end_raw):
+            if cand_rng:
+                rs, re_d, re_i, _ = parse_date_range(cand_rng)
+                if rs and re_i:
+                    start_disp, start_iso = rs, rs
+                    end_disp, end_iso = re_d, re_i
+                    break
+        if not start_disp and start_raw:
+            start_disp, start_iso = parse_single_date(start_raw)
+        if not end_disp and end_raw:
+            end_disp, end_iso = parse_single_date(end_raw)
         term_raw = ""
         if range_raw:
             r_s, r_e, r_e_iso, r_term = parse_date_range(range_raw)
@@ -1153,6 +1190,318 @@ def _rows_to_records(
     return records
 
 
+def _extract_contract_date_clauses(
+    merged_tables: List[ExtractedTable], full_text: str
+) -> List[Dict[str, Any]]:
+    """
+    从公告正文及「合同主要条款」2列/4列竖表中抽取每个产品的精确起息日、到期日、期限、金额及产品标识，
+    用于回填上交所等标准模板汇总横表里缺失的起息日与推算到期日（如中南传媒、开开实业、荣泰健康）。
+    """
+    clauses: List[Dict[str, Any]] = []
+    seen_keys = set()
+
+    # 1. 从 2列 / 4列 合同主要条款竖表抽取
+    start_pri_keys = ("起息日", "收益起算日", "产品起息日", "起算日", "成立日", "起始日", "存入日", "投资起始")
+    start_sec_keys = ("认购日", "购买日", "交易日")
+    end_keys = ("到期日", "产品到期日", "终止日", "到息日", "投资到期", "结束日")
+
+    for tb in merged_tables:
+        if not tb.rows or len(tb.rows[0]) not in (2, 4):
+            continue
+        ncols = len(tb.rows[0])
+        kv: Dict[str, str] = {}
+        for row in tb.rows:
+            pairs = [(row[0], row[1])] if ncols == 2 else [(row[0], row[1]), (row[2], row[3])]
+            for k_r, v_r in pairs:
+                k = clean_text(k_r)
+                v = clean_keep_spaces(v_r)
+                if k and v:
+                    kv[k] = v
+        if not kv:
+            continue
+
+        s_raw = ""
+        for kw in start_pri_keys:
+            for k, v in kv.items():
+                if kw in k and "预计" not in k:
+                    s_raw = v
+                    break
+            if s_raw:
+                break
+        if not s_raw:
+            for kw in start_sec_keys:
+                for k, v in kv.items():
+                    if kw in k:
+                        s_raw = v
+                        break
+                if s_raw:
+                    break
+
+        e_raw = ""
+        for kw in end_keys:
+            for k, v in kv.items():
+                if kw in k:
+                    e_raw = v
+                    break
+            if e_raw:
+                break
+
+        _, s_iso = parse_single_date(s_raw)
+        _, e_iso = parse_single_date(e_raw)
+        if not (s_iso or e_iso):
+            continue
+        if s_iso and e_iso and e_iso < s_iso:
+            continue
+
+        p_name = ""
+        p_code = ""
+        t_raw = ""
+        amt_wan = None
+        for k, v in kv.items():
+            if not p_name and any(w in k for w in ("产品名称", "理财产品名称", "产品全称")):
+                p_name = v
+            elif not p_code and any(w in k for w in ("产品编号", "产品代码", "编码", "代码")):
+                p_code = v
+            elif not t_raw and any(w in k for w in ("存款期限", "产品期限", "投资期限", "理财期限", "存续期", "期限")):
+                t_raw = v
+            elif amt_wan is None and any(w in k for w in ("认购金额", "购买金额", "投资金额", "委托金额", "本金", "金额")):
+                amt_wan, _ = parse_amount_wan(v, k)
+
+        ctx = clean_text(f"{tb.section_heading} {tb.context_above[-80:]} {p_name} {p_code} {' '.join(kv.values())[:200]}")
+        ck = (s_iso, e_iso, clean_text(t_raw), round(amt_wan, 1) if amt_wan else None, clean_text(p_name)[:30])
+        if ck not in seen_keys:
+            seen_keys.add(ck)
+            clauses.append(
+                {
+                    "start_iso": s_iso,
+                    "end_iso": e_iso,
+                    "term_raw": t_raw,
+                    "amount_wan": amt_wan,
+                    "prod_name": p_name,
+                    "prod_code": p_code,
+                    "context": ctx,
+                }
+            )
+
+    # 2. 从正文条款段落抽取（如荣泰健康：“起息日：2026年11月27日 ... 到期日：2027年3月2日 ... 购买金额：4,500万元”）
+    clean_body = re.sub(r"[ \t\r]+", "", full_text or "")
+    start_pat = re.compile(
+        r"(?:产品起息日|收益起算日|起息日|成立日|起始日|起算日)[：:]\s*(20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?)"
+    )
+    end_pat = re.compile(
+        r"(?:产品到期日|到期日|终止日|到息日)[：:]\s*(20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?)"
+    )
+    term_pat = re.compile(
+        r"(?:产品期限|存款期限|凭证存续期|投资期限|理财期限|存续期|期限)[：:]\s*(\d+\s*(?:个?(?:自然|交易|工作)?)?[天日]|(?:\d+\s*个?[年月]))"
+    )
+    amt_pat = re.compile(
+        r"(?:认购金额|购买金额|投资金额|委托金额|产品金额|本金)[：:]\s*(?:人民币)?([\d,.]+\s*[万亿]?元?)"
+    )
+
+    for m in start_pat.finditer(clean_body):
+        _, s_iso = parse_single_date(m.group(1))
+        if not s_iso:
+            continue
+        w_start = max(0, m.start() - 320)
+        w_end = min(len(clean_body), m.end() + 360)
+        win = clean_body[w_start:w_end]
+        after = clean_body[m.end() : w_end]
+
+        e_iso = ""
+        me = end_pat.search(after)
+        if me:
+            _, cand_e = parse_single_date(me.group(1))
+            if cand_e and cand_e >= s_iso:
+                e_iso = cand_e
+
+        mt = term_pat.search(win)
+        t_raw = mt.group(1) if mt else ""
+        ma = amt_pat.search(win)
+        amt_wan = parse_amount_wan(ma.group(1))[0] if ma else None
+
+        ctx = clean_text(win)
+        ck = (s_iso, e_iso, clean_text(t_raw), round(amt_wan, 1) if amt_wan else None, "")
+        if ck not in seen_keys:
+            seen_keys.add(ck)
+            clauses.append(
+                {
+                    "start_iso": s_iso,
+                    "end_iso": e_iso,
+                    "term_raw": t_raw,
+                    "amount_wan": amt_wan,
+                    "prod_name": "",
+                    "prod_code": "",
+                    "context": ctx,
+                }
+            )
+
+    return clauses
+
+
+def _term_to_days(term_raw: str) -> Optional[int]:
+    if not term_raw:
+        return None
+    t = clean_text(term_raw)
+    m_d = re.search(r"(\d+)\s*(?:个?(?:自然|交易|工作)?)?[天日]", t)
+    if m_d:
+        return int(m_d.group(1))
+    m_m = re.search(r"(\d+)\s*个?月", t)
+    if m_m:
+        return int(m_m.group(1)) * 30
+    m_y = re.search(r"(\d+)\s*年", t)
+    if m_y:
+        return int(m_y.group(1)) * 365
+    return None
+
+
+def _enrich_records_from_contract_clauses(
+    records: List[Dict[str, Any]],
+    merged_tables: List[ExtractedTable],
+    full_text: str,
+) -> None:
+    """
+    用同一份公告后文「合同主要条款」中的精确起息日、到期日，回填汇总横表里缺失的起息日及“约...”推算到期日。
+    """
+    need_recs = [
+        r
+        for r in records
+        if r.get("record_type") == "本次新购"
+        and (
+            not r.get("start_date")
+            or (r.get("end_date") or "").startswith("约")
+            or "推算" in (r.get("end_date") or "")
+        )
+    ]
+    if not need_recs:
+        return
+
+    clauses = _extract_contract_date_clauses(merged_tables, full_text)
+    if not clauses:
+        return
+
+    # 校验唯一日期对（例如两个产品共享同一张合同条款表）
+    unique_date_pairs = {(c["start_iso"], c["end_iso"]) for c in clauses}
+
+    for r_idx, r in enumerate(need_recs):
+        ann_dt_str = r.get("announce_date") or ""
+        try:
+            ann_dt = datetime.strptime(ann_dt_str, "%Y-%m-%d").date() if ann_dt_str else None
+        except ValueError:
+            ann_dt = None
+
+        r_term_days = _term_to_days(r.get("term_raw") or "")
+        r_prod = clean_text(r.get("product_name") or "")
+        # 抽取产品名中的期号/编码特征（>=3位数字或字母数字编号，排除年份2024/2025/2026）
+        prod_tokens = [
+            tok
+            for tok in re.findall(r"[A-Za-z]{2,}\d{3,}|\d{3,}", r_prod)
+            if tok not in ("2024", "2025", "2026", "2027", "2028")
+        ]
+
+        best_c = None
+        best_score = -1
+        for c in clauses:
+            s_iso = c["start_iso"]
+            e_iso = c["end_iso"]
+            # 硬性一致性检查：起息日不能离公告日过远（新购产品一般起息日在公告日前40天~后15天内）
+            if s_iso and ann_dt:
+                try:
+                    s_dt = datetime.strptime(s_iso, "%Y-%m-%d").date()
+                    delta = (s_dt - ann_dt).days
+                    if delta < -45 or delta > 20:
+                        continue
+                except ValueError:
+                    continue
+            # 硬性一致性检查：若双方都有天数期限，跨度误差必须 <= 10 天
+            if s_iso and e_iso and r_term_days:
+                try:
+                    span = (
+                        datetime.strptime(e_iso, "%Y-%m-%d").date()
+                        - datetime.strptime(s_iso, "%Y-%m-%d").date()
+                    ).days
+                    if abs(span - r_term_days) > 10:
+                        continue
+                except ValueError:
+                    continue
+
+            score = 0
+            if prod_tokens and any(tok in c["context"] for tok in prod_tokens):
+                score += 50
+            if c["amount_wan"] is not None and r.get("amount_wan") is not None:
+                if abs(float(c["amount_wan"]) - float(r["amount_wan"])) <= 0.05:
+                    score += 30
+            c_term_days = _term_to_days(c["term_raw"])
+            if r_term_days and c_term_days and abs(r_term_days - c_term_days) <= 3:
+                score += 20
+            inst_m = clean_text(r.get("institution_main") or "")
+            if inst_m and inst_m != "未披露" and inst_m[:4] in c["context"]:
+                score += 10
+
+            if score > best_score:
+                best_score = score
+                best_c = c
+
+        # 采纳条件：明确特征匹配 (>=20)，或整份公告仅有一组唯一合同日期，或条款数与缺失记录数严格 1-to-1 对应
+        chosen = None
+        if best_c is not None and best_score >= 20:
+            chosen = best_c
+        elif best_c is not None and len(unique_date_pairs) == 1:
+            chosen = best_c
+        elif len(clauses) == len(need_recs):
+            cand = clauses[r_idx]
+            ok_1to1 = True
+            if cand["start_iso"] and cand["end_iso"] and r_term_days:
+                try:
+                    span = (
+                        datetime.strptime(cand["end_iso"], "%Y-%m-%d").date()
+                        - datetime.strptime(cand["start_iso"], "%Y-%m-%d").date()
+                    ).days
+                    if abs(span - r_term_days) > 10:
+                        ok_1to1 = False
+                except ValueError:
+                    pass
+            if ok_1to1:
+                chosen = cand
+
+        if not chosen:
+            continue
+
+        changed = False
+        if chosen["start_iso"] and not r.get("start_date"):
+            r["start_date"] = chosen["start_iso"]
+            changed = True
+        if chosen["end_iso"] and (
+            not r.get("end_date_iso")
+            or (r.get("end_date") or "").startswith("约")
+            or "推算" in (r.get("end_date") or "")
+        ):
+            r["end_date"] = chosen["end_iso"]
+            r["end_date_iso"] = chosen["end_iso"]
+            changed = True
+        elif chosen["start_iso"] and r.get("term_raw") and (
+            not r.get("end_date_iso") or (r.get("end_date") or "").startswith("约")
+        ):
+            est = estimate_end_date(chosen["start_iso"], r["term_raw"])
+            if est:
+                r["end_date_iso"] = est
+                r["end_date"] = f"{est}(按{r['term_raw']}推算)"
+                changed = True
+
+        if changed:
+            r["maturity_status"] = compute_maturity_status(
+                r["record_type"], r.get("end_date") or "", r.get("end_date_iso") or "", r.get("term_raw") or ""
+            )
+
+    # 若有任何记录的起息日/到期日被回填，统一刷新本公告内所有记录指纹（保持同公告多笔序号唯一）
+    dup_counter: Dict[str, int] = {}
+    for rec in records:
+        base_k = f"{rec['record_type']}|{rec['institution_main']}|{rec['product_name']}|{rec['amount_wan']}|{rec['start_date']}|{rec['end_date']}"
+        dup_counter[base_k] = dup_counter.get(base_k, 0) + 1
+        rec["_dup_seq"] = dup_counter[base_k] - 1
+        rec["fingerprint"] = make_fingerprint(rec)
+        rec.pop("_dup_seq", None)
+
+
 def _extract_from_prose(ann: Dict[str, Any], company_name: str, full_text: str) -> List[Dict[str, Any]]:
     """
     兜底解析：针对没有画表格、仅用文字段落披露单笔购买/赎回的公告（如 600713 南京医药 等）
@@ -1167,9 +1516,9 @@ def _extract_from_prose(ann: Dict[str, Any], company_name: str, full_text: str) 
     kv_prod = re.search(r"(?:产品名称|理财产品名称|投资产品)[：:]([^\n。；;，,]{2,50})", line_body)
     kv_amt = re.search(r"(?:认购金额|购买金额|投资金额|委托金额|产品金额|本金|赎回金额)[：:](?:人民币)?([\d,.]+\s*[万亿]?元?)", line_body)
     kv_rate = re.search(r"(?:预期年化收益率|预计年化收益率|预计年收益率|年化收益率|年收益率|预期收益率)[：:]([^\n。；;，,]{1,35})", line_body)
-    kv_start = re.search(r"(?:起息日|起始日|认购日|购买日|成立日|投资起始日)[：:](20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?)", line_body)
+    kv_start = re.search(r"(?:起息日|起算日|起始日|认购日|购买日|成立日|投资起始日)[：:](20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?)", line_body)
     kv_end = re.search(r"(?:到期日|终止日|赎回日|投资到期日)[：:](20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?|随时[^\n。；;，,]{1,10}|无固定期限)", line_body)
-    kv_term = re.search(r"(?:产品期限|存款期限|投资期限)[：:]([^\n。；;，,]{1,20})", line_body)
+    kv_term = re.search(r"(?:产品期限|存款期限|投资期限|存续期)[：:]([^\n。；;]{1,45})", line_body)
     kv_income = re.search(r"(?:实际收益|获得收益|投资收益|理财收益|利息收入)[：:](?:人民币)?([\d,.]+\s*[万亿]?元?)", line_body)
 
     if kv_inst and kv_amt:
@@ -1183,6 +1532,14 @@ def _extract_from_prose(ann: Dict[str, Any], company_name: str, full_text: str) 
             s_disp, s_iso = parse_single_date(kv_start.group(1) if kv_start else "")
             e_disp, e_iso = parse_single_date(kv_end.group(1) if kv_end else "")
             term_raw = kv_term.group(1) if kv_term else ""
+            if term_raw and (not s_iso or not e_iso):
+                r_s, r_e, r_e_iso, r_t = parse_date_range(term_raw)
+                if r_s and r_e_iso:
+                    s_disp = s_disp or r_s
+                    s_iso = s_iso or r_s
+                    e_disp = e_disp or r_e
+                    e_iso = e_iso or r_e_iso
+                    term_raw = r_t
             if not e_iso and s_iso and term_raw:
                 e_iso = estimate_end_date(s_iso, term_raw)
             rec_type = "到期赎回" if (ann.get("ann_category") == "到期赎回" or kv_income) else "本次新购"
@@ -1439,6 +1796,10 @@ def parse_pdf_announcement(
                     ann, company_name, full_text, tb, header, body_rows, col_map, "本次新购", only_recent_window=True
                 )
                 extracted.extend(recs)
+
+        # 若常规新购记录缺少起息日或到期日为推算值，尝试用同公告「合同主要条款」竖表/正文回填精确日期
+        if extracted and not is_special_report:
+            _enrich_records_from_contract_clauses(extracted, merged, full_text)
 
         return extracted
 

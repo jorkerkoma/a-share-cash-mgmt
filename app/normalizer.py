@@ -661,6 +661,10 @@ def parse_date_range(raw: str) -> Tuple[str, str, str, str]:
     if not text:
         return ("", "", "", "")
     dates = re.findall(r"20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?", text)
+    if len(dates) < 2:
+        dates_8 = re.findall(r"(?<!\d)20\d{6}(?!\d)", text)
+        if len(dates_8) >= 2:
+            dates = dates_8
     if len(dates) >= 2:
         s_disp, _ = parse_single_date(dates[0])
         e_disp, e_iso = parse_single_date(dates[-1])
@@ -687,17 +691,20 @@ def estimate_end_date(start_iso: str, term_raw: str) -> str:
         return ""
 
     t = clean_text(term_raw)
-    m_day = re.search(r"(\d+)\s*(?:个?(?:自然|交易|工作)?)?[天日]", t)
+    # 剔除日历日期（如 "2026年11月11日-2027年6月21日"），严防把 "11日" 误匹配成 "11天"！
+    t = re.sub(r"20\d{2}[年./\-]\d{1,2}[月./\-]\d{1,2}日?", "", t)
+    t = re.sub(r"20\d{2}年\d{1,2}月?", "", t)
+    m_day = re.search(r"(?<!月)(\d+)\s*(?:个?(?:自然|交易|工作)?)?[天日]", t)
     if m_day:
         days = int(m_day.group(1))
         if 1 <= days <= 3650:
             return (dt + timedelta(days=days)).strftime("%Y-%m-%d")
-    m_mon = re.search(r"(\d+)\s*个?月", t)
+    m_mon = re.search(r"(?<!年)(\d+)\s*个?月", t)
     if m_mon:
         months = int(m_mon.group(1))
         if 1 <= months <= 120:
             return (dt + timedelta(days=months * 30)).strftime("%Y-%m-%d")
-    m_yr = re.search(r"(\d+)\s*年", t)
+    m_yr = re.search(r"(?<!\d)(\d{1,2})\s*年", t)
     if m_yr:
         yrs = int(m_yr.group(1))
         if 1 <= yrs <= 10:
