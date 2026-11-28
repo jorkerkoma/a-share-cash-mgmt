@@ -1027,23 +1027,76 @@ async function initStaticData() {
     fetch(`./data/records.json?v=${DATA_VER}`).then(r => r.json()),
     fetch(`./data/meta.json?v=${DATA_VER}`).then(r => r.json()),
   ]);
-  const fields = recJson.fields || [];
   const todayStr = getBjTodayStr(0);
-  const recs = (recJson.rows || []).map((arr, idx) => {
-    const obj = { id: idx + 1 };
-    for (let i = 0; i < fields.length; i++) obj[fields[i]] = arr[i];
-    // 按浏览器当日北京时间动态校准存续/已到期状态
-    if (obj.record_type === '本次新购' && obj.end_date_iso) {
-      if ((obj.maturity_status === '存续中' || obj.maturity_status === '未知') && obj.end_date_iso <= todayStr) {
-        obj.maturity_status = '已到期';
+  let recs;
+  if (recJson.v === 2) {
+    const comps = recJson.companies || [];
+    const dict = recJson.dict || [];
+    const pdfPre = recJson.pdf_prefix || '';
+    const dGet = (v) => (typeof v === 'number' ? (dict[v] || '') : (v || ''));
+    recs = (recJson.rows || []).map((a, idx) => {
+      const c = comps[a[0]] || ['', '', '', '', '', ''];
+      const endDate = a[18] || '';
+      const obj = {
+        id: idx + 1,
+        sec_code: c[0],
+        sec_name: c[1],
+        company_name: c[2],
+        market: c[3],
+        province: c[4],
+        city: c[5],
+        announce_date: a[1] || '',
+        entrusting_party: a[2] || c[2],
+        record_type: dGet(a[3]),
+        maturity_status: dGet(a[4]),
+        institution_type: dGet(a[5]),
+        institution_main: dGet(a[6]),
+        branch_name: dGet(a[7]),
+        product_name: a[8] || '',
+        product_type: dGet(a[9]),
+        product_type_raw: dGet(a[10]),
+        amount_wan: a[11],
+        currency: a[12] || '人民币',
+        yield_rate_raw: a[13] || '',
+        yield_min: a[14],
+        yield_max: a[15],
+        actual_income_wan: a[16],
+        start_date: a[17] || '',
+        end_date: endDate,
+        end_date_iso: a[19] === '' ? endDate : (a[19] || ''),
+        term_raw: a[20] || '',
+        fund_source: dGet(a[21]),
+        pdf_url: a[22] ? (a[22].startsWith('http') ? a[22] : pdfPre + a[22]) : '',
+      };
+      if (obj.record_type === '本次新购' && obj.end_date_iso) {
+        if ((obj.maturity_status === '存续中' || obj.maturity_status === '未知') && obj.end_date_iso <= todayStr) {
+          obj.maturity_status = '已到期';
+        }
       }
-    }
-    obj._search = [
-      obj.company_name, obj.sec_name, obj.sec_code, obj.province, obj.city,
-      obj.institution_main, obj.branch_name, obj.product_name
-    ].filter(Boolean).join('|').toLowerCase();
-    return obj;
-  });
+      obj._search = [
+        obj.company_name, obj.sec_name, obj.sec_code, obj.province, obj.city,
+        obj.institution_main, obj.branch_name, obj.product_name
+      ].filter(Boolean).join('|').toLowerCase();
+      return obj;
+    });
+  } else {
+    const fields = recJson.fields || [];
+    recs = (recJson.rows || []).map((arr, idx) => {
+      const obj = { id: idx + 1 };
+      for (let i = 0; i < fields.length; i++) obj[fields[i]] = arr[i];
+      // 按浏览器当日北京时间动态校准存续/已到期状态
+      if (obj.record_type === '本次新购' && obj.end_date_iso) {
+        if ((obj.maturity_status === '存续中' || obj.maturity_status === '未知') && obj.end_date_iso <= todayStr) {
+          obj.maturity_status = '已到期';
+        }
+      }
+      obj._search = [
+        obj.company_name, obj.sec_name, obj.sec_code, obj.province, obj.city,
+        obj.institution_main, obj.branch_name, obj.product_name
+      ].filter(Boolean).join('|').toLowerCase();
+      return obj;
+    });
+  }
   state.staticRecords = recs;
   state.staticMeta = metaJson;
   state.staticReady = true;

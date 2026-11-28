@@ -454,18 +454,24 @@ def parse_amount_wan(val_raw: str, header_raw: str = "", table_unit_hint: str = 
         unit = "yi"
     elif re.search(r"万", raw):
         unit = "wan"
+    elif re.search(r"千元", raw):
+        unit = "qian"
     elif re.search(r"(?:元|美元|港元|港币|欧元)", raw):
         unit = "yuan"
     elif re.search(r"亿", header_raw or ""):
         unit = "yi"
     elif re.search(r"万", header_raw or ""):
         unit = "wan"
+    elif re.search(r"千", header_raw or ""):
+        unit = "qian"
     elif re.search(r"[（(]\s*(?:人民币[：:]?\s*)?元\s*[）)]|单位[：:]\s*(?:人民币)?元|金额[（(]元[）)]", header_raw or ""):
         unit = "yuan"
     elif re.search(r"亿", table_unit_hint or ""):
         unit = "yi"
     elif re.search(r"万", table_unit_hint or ""):
         unit = "wan"
+    elif re.search(r"千", table_unit_hint or ""):
+        unit = "qian"
     elif re.search(r"元", table_unit_hint or ""):
         unit = "yuan"
     elif re.match(r"^[￥¥]", raw) and abs(num) >= 100_000:
@@ -473,10 +479,16 @@ def parse_amount_wan(val_raw: str, header_raw: str = "", table_unit_hint: str = 
 
     if unit == "yi":
         val_wan = num * 10000.0
+    elif unit == "qian":
+        val_wan = num / 10.0
     elif unit == "yuan":
         val_wan = num / 10000.0
     elif unit == "wan":
-        val_wan = num
+        # 强保护：若单笔人民币金额无单元格“万/亿”后缀却 >= 1,000,000（按万元算>=100亿元），说明该表实际以“元”计价（表前/表头误标万元）
+        if currency == "人民币" and abs(num) >= 1_000_000 and not re.search(r"[万亿]", raw):
+            val_wan = num / 10000.0
+        else:
+            val_wan = num
     else:
         # 未标注单位时：单笔理财如果数值 >= 1,000,000（即若按万元算>=100亿），极大概率原单位是“元”
         if abs(num) >= 1_000_000:

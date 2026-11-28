@@ -54,9 +54,14 @@ REJECT_TABLE_HEADERS = (
     "拟使用募集资金金额",
     "项目名称",
     "银行账号",
+    "银行帐号",
     "专户账号",
+    "专户帐号",
+    "账户状态",
     "募集资金专户",
+    "专户存储",
     "专户余额",
+    "募投项目",
     "发行名称",
     "募集资金到账时间",
     "股东名称",
@@ -551,6 +556,28 @@ def _classify_table(
     if ("institution" not in col_map) and ("amount" not in col_map) and ("redeem_amount" not in col_map):
         return "ignore"
 
+    # 专项报告模式（《募集资金存放与实际使用情况专项报告》）：精准命中闲置募集资金现金管理明细表，跳过专户存储/募投对照/补流/置换表，不做35天窗口截断
+    if ann_category == "专项报告":
+        if any(
+            bad in hdr_joined
+            for bad in (
+                "账号", "帐号", "账户状态", "专户", "存放方式", "承诺投资", "累计投入",
+                "投入进度", "置换", "补充流动资金", "补流", "节余", "开户行及账号",
+            )
+        ):
+            return "ignore"
+        ctx_sp = clean_text(f"{section_heading}{context_above}")
+        has_prod_cols = any(k in col_map for k in ("product_name", "product_type", "yield_rate"))
+        has_cm_ctx = any(k in ctx_sp for k in ("现金管理", "委托理财", "理财产品", "结构性存款", "大额存单", "收益凭证", "存款产品"))
+        is_bad_ctx = any(k in ctx_sp[-80:] for k in ("专户存储", "专项账户存储", "专户信息", "补充流动资金", "预先投入", "置换"))
+        if is_bad_ctx and not has_cm_ctx:
+            return "ignore"
+        if not (has_prod_cols or has_cm_ctx):
+            return "ignore"
+        if not (("amount" in col_map) or ("redeem_amount" in col_map)):
+            return "ignore"
+        return "special_report"
+
     # 1. 强信号判断 12个月/历史滚动汇总表
     if _is_summary_12m_context(section_heading, context_above):
         return "summary_12m"
@@ -592,7 +619,7 @@ def _classify_table(
 
 
 def _detect_unit_hint(context_above: str) -> str:
-    m = re.search(r"单位[：:]\s*([人民币美元港元港币万亿元]+)", clean_text(context_above))
+    m = re.search(r"单位[：:]\s*([人民币美元港元港币万亿千元]+)", clean_text(context_above))
     return m.group(1) if m else ""
 
 
@@ -753,9 +780,13 @@ def _rows_to_records(
     col_map: Dict[str, int],
     record_type: str,
     only_recent_window: bool = False,
+    special_report: bool = False,
 ) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     unit_hint = _detect_unit_hint(table.context_above)
+    if not unit_hint and not re.search(r"[万亿千元]", clean_text("".join(header))):
+        if re.search(r"单位[：:]\s*(?:人民币)?千元", clean_text(full_text)):
+            unit_hint = "千元"
 
     last_entrusting = ""
     last_institution = ""
@@ -773,6 +804,22 @@ def _rows_to_records(
         if idx is None or idx >= len(header):
             return ""
         return clean_keep_spaces(header[idx])
+
+    # 表级“元”计价检测：若表内存在 >= 1,000,000 且不带“万/亿”的纯人民币金额（如 400,000,000.00 元），
+    # 说明整张表的金额列均为“元”（而非“万元”），确保同表中较小金额行（如 500,000.00 元）一并换算为万元
+    table_force_yuan = False
+    for r_chk in body_rows:
+        c_amt = clean_text(get_cell(r_chk, "amount") or get_cell(r_chk, "redeem_amount"))
+        if not c_amt or re.search(r"[万亿]|印尼|越南|泰铢|韩元|日元", c_amt):
+            continue
+        m_num = re.search(r"(\d{1,3}(?:,\d{3}){2,}(?:\.\d+)?|\d{7,}(?:\.\d+)?)", c_amt)
+        if m_num:
+            try:
+                if float(m_num.group(1).replace(",", "")) >= 1_000_000:
+                    table_force_yuan = True
+                    break
+            except ValueError:
+                pass
 
     for row in body_rows:
         row_joined = clean_text("".join(row))
@@ -855,7 +902,9 @@ def _rows_to_records(
         ):
             amt_raw = amt_clean_chk[2:]
 
-        amount_wan, currency = parse_amount_wan(amt_raw, amt_hdr, unit_hint)
+        eff_unit_hint = "元" if (table_force_yuan and not re.search(r"[万亿]", amt_raw)) else unit_hint
+        eff_amt_hdr = "金额（元）" if (table_force_yuan and not re.search(r"[万亿]", amt_raw)) else amt_hdr
+        amount_wan, currency = parse_amount_wan(amt_raw, eff_amt_hdr, eff_unit_hint)
         # 严控碎片行、0元错位行，以及额度计划表中的“不超过XX亿元/最高余额上限”计划行
         if amount_wan is None or amount_wan <= 0:
             continue
@@ -908,7 +957,23 @@ def _rows_to_records(
             else (parse_income_wan(income_raw, income_hdr, amount_wan, unit_hint) if income_raw else None)
         )
 
-        if only_recent_window:
+        if special_report:
+            # 专项报告整期全量提取：剔除2025年以前已结束的纯历史旧交易，其余按行判定是否已赎回
+            if end_iso and end_iso < "2025-01-01":
+                continue
+            if not end_iso and start_iso and start_iso < "2024-01-01":
+                continue
+            if (
+                not row_not_matured
+                and (
+                    any(k in redeemed_flag for k in ("是", "已到期", "已赎回", "全部收回", "已收回", "收回", "到期"))
+                    or actual_income_wan is not None
+                )
+            ):
+                row_rec_type = "到期赎回"
+            else:
+                row_rec_type = "本次新购"
+        elif only_recent_window:
             ann_dt = datetime.strptime(ann["announce_date"], "%Y-%m-%d").date()
             in_window = False
             for d_str in (start_iso, end_iso):
@@ -1002,6 +1067,11 @@ def _rows_to_records(
                 ("幸福99", ("银行", "杭州银行", "未披露")),
                 ("阳光金", ("银行理财子", "光大理财", "未披露")),
                 ("聚益生金", ("银行", "中国农业银行", "未披露")),
+                ("共赢智信", ("银行", "中信银行", "未披露")),
+                ("蕴通财富", ("银行", "交通银行", "未披露")),
+                ("点金系列", ("银行", "招商银行", "未披露")),
+                ("聚赢汇率", ("银行", "中国民生银行", "未披露")),
+                ("聚赢利率", ("银行", "中国民生银行", "未披露")),
             ]
             matched_brand = None
             for bk, bval in brand_infer:
@@ -1026,6 +1096,13 @@ def _rows_to_records(
                     inst_type, inst_main, branch_name = "其他", "未披露", "未披露"
 
         prod_type_std = normalize_product_type(prod_name, prod_type_raw)
+        if special_report:
+            # 专项报告二次清洗：过滤空产品名且无起止日期的汇总/专户余额行，及纯活期/募投项目/补流行
+            no_dates = (start_disp in ("", "-", "--", "——", "/")) and (end_disp in ("", "-", "--", "——", "/"))
+            if prod_name in ("", "-", "--", "——", "/") and prod_type_std == "其他" and no_dates:
+                continue
+            if any(bad in prod_name for bad in ("活期存款", "活期账户", "已注销", "建设项目", "补充流动资金")) and prod_type_std == "其他":
+                continue
         maturity_status = compute_maturity_status(row_rec_type, end_disp, end_iso, term_raw)
         fund_source = normalize_fund_source(fund_raw, ann.get("fund_source_hint", ""))
 
@@ -1062,7 +1139,7 @@ def _rows_to_records(
             "section_title": table.section_heading[:80],
             "pdf_url": ann["pdf_url"],
             "ann_title": ann["title"],
-            "parse_method": table.method,
+            "parse_method": f"{table.method}_special" if special_report else table.method,
         }
 
         base_k = f"{rec['record_type']}|{rec['institution_main']}|{rec['product_name']}|{rec['amount_wan']}|{rec['start_date']}|{rec['end_date']}"
@@ -1301,9 +1378,20 @@ def parse_pdf_announcement(
         return (ann["sec_name"], "needs_review", "扫描件或无可用文字层", [])
 
     company_name = _extract_company_full_name(full_text[:2200], ann["sec_name"])
+    is_special_report = ann.get("ann_category") == "专项报告"
     if ann.get("fund_source_hint") in ("", "未注明"):
         ann = dict(ann)
         ann["fund_source_hint"] = normalize_fund_source(full_text[:1500])
+
+    # 专项报告极速预检：若全文不含任何现金管理/理财具体产品关键词，直接跳过（避免无谓的 pdfplumber 开销）
+    if is_special_report and not any(
+        k in full_text
+        for k in (
+            "结构性存款", "大额存单", "收益凭证", "理财产品", "通知存款", "协定存款",
+            "定期存款", "国债逆回购", "货币基金", "收益型", "银行理财", "券商理财", "现金管理产品",
+        )
+    ):
+        return (company_name, "skipped", "专项报告无现金管理具体产品明细", [])
 
     def run_table_pipeline(tables: List[ExtractedTable]) -> List[Dict[str, Any]]:
         merged = _merge_cross_page_tables(tables)
@@ -1311,8 +1399,8 @@ def parse_pdf_announcement(
         summary_tables: List[Tuple[ExtractedTable, List[str], List[List[str]], Dict[str, int]]] = []
 
         for tb in merged:
-            # 优先识别 2列 / 4列 竖排键值对明细表（如森霸传感）
-            if tb.rows and len(tb.rows[0]) in (2, 4):
+            # 优先识别 2列 / 4列 竖排键值对明细表（如森霸传感）；专项报告不含竖排交易单，跳过防误匹配对照表
+            if not is_special_report and tb.rows and len(tb.rows[0]) in (2, 4):
                 kv_recs = _try_parse_kv_table(ann, company_name, full_text, tb)
                 if kv_recs:
                     extracted.extend(kv_recs)
@@ -1326,6 +1414,12 @@ def parse_pdf_announcement(
                 header, col_map, tb.section_heading, tb.context_above, ann.get("ann_category", "")
             )
             if t_kind == "ignore":
+                continue
+            if t_kind == "special_report":
+                recs = _rows_to_records(
+                    ann, company_name, full_text, tb, header, body_rows, col_map, "本次新购", special_report=True
+                )
+                extracted.extend(recs)
                 continue
             if t_kind == "summary_12m":
                 summary_tables.append((tb, header, body_rows, col_map))
@@ -1349,6 +1443,21 @@ def parse_pdf_announcement(
         return extracted
 
     records = run_table_pipeline(raw_tables)
+
+    if is_special_report:
+        if not records and any(
+            k in full_text
+            for k in ("起息日", "到期日", "认购金额", "购买金额", "委托理财金额", "受托方", "受托人", "预期年化")
+        ):
+            try:
+                pb_tables = _extract_tables_pdfplumber(pdf_bytes)
+                if pb_tables:
+                    records = run_table_pipeline(pb_tables)
+            except Exception:
+                pass
+        if records:
+            return (company_name, "parsed", f"专项报告提取{len(records)}条记录", records)
+        return (company_name, "skipped", "专项报告无逐笔现金管理明细表", [])
 
     # 提前识别纯额度授权公告，避免在无任何交易明细表的PDF上浪费慢速 pdfplumber 解析
     if (

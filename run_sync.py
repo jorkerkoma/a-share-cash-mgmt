@@ -19,6 +19,7 @@ def main():
     parser.add_argument("--full", action="store_true", help="强制全量重跑（忽略已处理记录）")
     parser.add_argument("--workers", type=int, default=8, help="并发线程/进程数（默认8）")
     parser.add_argument("--processes", action="store_true", help="启用多进程并发解析PDF（大跨度补抓提速3-4倍）")
+    parser.add_argument("--keywords", type=str, default=None, help="自定义检索关键词（逗号分隔，默认全量关键词）")
     parser.add_argument("--no-excel", action="store_true", help="跳过自动导出Excel")
     args = parser.parse_args()
 
@@ -31,9 +32,12 @@ def main():
     else:
         date_from = None
 
+    kw_list = [k.strip() for k in args.keywords.split(",") if k.strip()] if args.keywords else None
+
     res = run_sync(
         date_from=date_from,
         date_to=date_to,
+        keywords=kw_list,
         incremental=not args.full,
         max_workers=args.workers,
         use_processes=args.processes,

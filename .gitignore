@@ -7,8 +7,9 @@ venv/
 *.log
 .DS_Store
 Thumbs.db
+data/*.db
 data/*.db-wal
 data/*.db-shm
+!data/cash_mgmt.db.gz
 output/*.xlsx
 !dist/
-!data/cash_mgmt.db

@@ -16,8 +16,8 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 CNINFO_QUERY_URL = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
 CNINFO_STATIC_BASE = "https://static.cninfo.com.cn/"
 
-# 默认抓取关键词（覆盖现金管理、委托理财、购买理财产品、结构性存款，按公告ID自动去重）
-DEFAULT_KEYWORDS = ["现金管理", "委托理财", "购买理财产品", "结构性存款"]
+# 默认抓取关键词（覆盖现金管理、委托理财、购买理财产品、结构性存款、募集资金专项报告，按公告ID自动去重）
+DEFAULT_KEYWORDS = ["现金管理", "委托理财", "购买理财产品", "结构性存款", "募集资金专项报告"]
 
 # 默认抓取近92天（近3个月）
 DEFAULT_LOOKBACK_DAYS = 92

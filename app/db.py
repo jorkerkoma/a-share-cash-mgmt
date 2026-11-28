@@ -118,11 +118,13 @@ def init_db(db_path: Path = DB_PATH) -> None:
             conn.execute("ALTER TABLE records ADD COLUMN city TEXT DEFAULT ''")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_records_province ON records(province)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_records_city ON records(city)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_records_reconcile ON records(sec_code, record_type, institution_main)")
 
 
 @contextmanager
 def get_conn(db_path: Path = DB_PATH):
-    conn = sqlite3.connect(db_path, timeout=30)
+    conn = sqlite3.connect(db_path, timeout=120)
+    conn.execute("PRAGMA busy_timeout = 120000;")
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -173,9 +175,69 @@ def replace_announcement_records(
     conn.execute("DELETE FROM records WHERE announcement_id = ?", (announcement_id,))
     inserted = 0
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    special_seen: Dict[Tuple[str, float, str, str], int] = {}
+
     for rec in records:
         rec = dict(rec)
         rec.setdefault("created_at", now)
+
+        # 专项报告跨公告智能去重：若临时进展公告或更早专项报告已入库同笔交易，则不重复插入，并顺带补齐更细的分支行名称
+        if str(rec.get("parse_method") or "").endswith("_special"):
+            sec_code = rec.get("sec_code") or ""
+            amt = rec.get("amount_wan")
+            s_dt = (rec.get("start_date") or "").strip()
+            e_dt = (rec.get("end_date_iso") or "").strip()
+            inst = (rec.get("institution_main") or "").strip()
+            br = (rec.get("branch_name") or "").strip()
+            if sec_code and amt is not None and (s_dt or e_dt):
+                date_conds = []
+                date_params: List[Any] = []
+                if s_dt and e_dt:
+                    date_conds.append(
+                        "((start_date = ? AND (end_date_iso = '' OR end_date_iso IS NULL OR end_date_iso = ?)) "
+                        "OR (end_date_iso = ? AND (start_date = '' OR start_date IS NULL OR start_date = ?)))"
+                    )
+                    date_params.extend([s_dt, e_dt, e_dt, s_dt])
+                elif s_dt:
+                    date_conds.append("start_date = ?")
+                    date_params.append(s_dt)
+                else:
+                    date_conds.append("end_date_iso = ?")
+                    date_params.append(e_dt)
+
+                matches = conn.execute(
+                    f"""
+                    SELECT id, institution_main, branch_name
+                    FROM records
+                    WHERE announcement_id != ?
+                      AND sec_code = ?
+                      AND ABS(amount_wan - ?) <= 0.05
+                      AND ({' AND '.join(date_conds)})
+                      AND (
+                          institution_main = ?
+                          OR institution_main IS NULL OR institution_main IN ('', '未披露')
+                          OR ? IN ('', '未披露')
+                      )
+                    """,
+                    [announcement_id, sec_code, float(amt), *date_params, inst, inst],
+                ).fetchall()
+
+                bucket = (sec_code, round(float(amt), 1), s_dt, e_dt)
+                seen_idx = special_seen.get(bucket, 0)
+                special_seen[bucket] = seen_idx + 1
+
+                if seen_idx < len(matches):
+                    # 已有同笔记录：若专项报告提供了具体支行而库内为“未披露”，顺手丰富支行信息
+                    target = matches[seen_idx]
+                    if br and br != "未披露" and (not target["branch_name"] or target["branch_name"] == "未披露"):
+                        conn.execute("UPDATE records SET branch_name = ? WHERE id = ?", (br, target["id"]))
+                    if inst and inst != "未披露" and (not target["institution_main"] or target["institution_main"] == "未披露"):
+                        conn.execute(
+                            "UPDATE records SET institution_main = ?, institution_type = ? WHERE id = ?",
+                            (inst, rec.get("institution_type") or "其他", target["id"]),
+                        )
+                    continue
+
         try:
             cur = conn.execute(
                 """

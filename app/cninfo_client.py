@@ -140,6 +140,16 @@ def classify_title(title: str) -> Tuple[bool, str, str]:
     else:
         fund_hint = "未注明"
 
+    # 董事会《募集资金存放与实际使用情况专项报告》（跳过重复/扫描版会计师鉴证报告、券商核查意见等）
+    if "募集资金" in clean_t and "专项报告" in clean_t:
+        special_excludes = (
+            "鉴证", "核查", "审计", "独立意见", "法律意见", "决议", "摘要", "英文",
+            "更正公告", "补充公告", "对照表", "保荐", "持续督导", "财务顾问", "问询", "监管", "说明",
+        )
+        if not any(ex in clean_t for ex in special_excludes):
+            return (True, "专项报告", "闲置超募资金" if "超募" in clean_t else "闲置募集资金")
+        return (False, "非交易过滤", fund_hint)
+
     # 必须和理财/现金管理相关（防止搜到无关公告）
     if not any(
         k in clean_t
@@ -201,12 +211,15 @@ def fetch_announcement_list(
     sess = session or create_cninfo_session()
     seen: Dict[str, Dict] = {}
 
-    chunks = _date_chunks(date_from, date_to, chunk_days=20)
+    base_chunks = _date_chunks(date_from, date_to, chunk_days=15)
     for kw in keywords:
-        for c_start, c_end in chunks:
+        pending_chunks = list(base_chunks)
+        while pending_chunks:
+            c_start, c_end = pending_chunks.pop(0)
             se_date = f"{c_start}~{c_end}"
             page = 1
             page_size = 30
+            split_triggered = False
             while True:
                 payload = {
                     "pageNum": page,
@@ -245,6 +258,17 @@ def fetch_announcement_list(
                             time.sleep(0.8 * (attempt + 1))
 
                 if not data:
+                    break
+
+                total_rec = int(data.get("totalAnnouncement") or data.get("totalRecordNum") or 0)
+                # 若高峰期单分片逼近巨潮 3000 条分页上限，自动二分日期区间彻底防止截断
+                if page == 1 and total_rec >= 2700 and c_start < c_end:
+                    d_s = datetime.strptime(c_start, "%Y-%m-%d").date()
+                    d_e = datetime.strptime(c_end, "%Y-%m-%d").date()
+                    mid = d_s + timedelta(days=(d_e - d_s).days // 2)
+                    pending_chunks.insert(0, ((mid + timedelta(days=1)).strftime("%Y-%m-%d"), c_end))
+                    pending_chunks.insert(0, (c_start, mid.strftime("%Y-%m-%d")))
+                    split_triggered = True
                     break
 
                 anns = data.get("announcements") or []
@@ -297,12 +321,13 @@ def fetch_announcement_list(
                         "should_fetch": should_fetch,
                     }
 
-                total_rec = int(data.get("totalAnnouncement") or data.get("totalRecordNum") or 0)
                 if progress_cb:
                     progress_cb(f"拉取目录 [{kw}] {se_date} 第{page}页，已发现 {len(seen)} 份唯一公告")
                 if not data.get("hasMore") or page * page_size >= total_rec or page >= 100:
                     break
                 page += 1
+            if split_triggered:
+                continue
 
     # 按公告日期倒序排列
     result = sorted(seen.values(), key=lambda x: (x["announce_date"], x["announcement_id"]), reverse=True)

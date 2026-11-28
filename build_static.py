@@ -54,21 +54,87 @@ def build_static_site(db_path: Path = DB_PATH) -> dict:
 
     DIST_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. 导出紧凑数组格式的 records.json（体积压缩约55%，国内4G/5G秒开）
+    # 1. 导出 V2 字典压缩格式的 records.json（公司表去重 + 枚举字典 + PDF前缀剥离，体积直降约 58%，国内 4G/5G 秒开）
     cols_sql = ", ".join(COMPACT_FIELDS)
     with get_conn(db_path) as conn:
         rows = conn.execute(
             f"SELECT {cols_sql} FROM records ORDER BY announce_date DESC, id DESC"
         ).fetchall()
 
+    pdf_prefix = "https://static.cninfo.com.cn/finalpage/"
+    comp_map = {}
+    comp_list = []
+    str_map = {}
+    str_list = []
+
+    def intern_str(v):
+        if not v:
+            return ""
+        idx_s = str_map.get(v)
+        if idx_s is None:
+            idx_s = len(str_list)
+            str_map[v] = idx_s
+            str_list.append(v)
+        return idx_s
+
     compact_rows = []
     for r in rows:
-        compact_rows.append([r[f] for f in COMPACT_FIELDS])
+        sc = r["sec_code"] or ""
+        ci = comp_map.get(sc)
+        if ci is None:
+            ci = len(comp_list)
+            comp_map[sc] = ci
+            comp_list.append([
+                sc,
+                r["sec_name"] or "",
+                r["company_name"] or "",
+                r["market"] or "",
+                r["province"] or "",
+                r["city"] or "",
+            ])
+        pdf_val = r["pdf_url"] or ""
+        if pdf_val.startswith(pdf_prefix):
+            pdf_val = pdf_val[len(pdf_prefix):]
+        ent_val = r["entrusting_party"] or ""
+        if ent_val == (r["company_name"] or ""):
+            ent_val = ""
+        end_d = r["end_date"] or ""
+        end_iso = r["end_date_iso"] or ""
+        # 仅当 end_date_iso 与 end_date 相同且非空时简写为 ""；若不同或无标准 ISO 日期，传 None/具体值避免还原错位
+        end_iso_enc = "" if (end_iso and end_iso == end_d) else (end_iso if end_iso else None)
+        compact_rows.append([
+            ci,
+            r["announce_date"] or "",
+            ent_val,
+            intern_str(r["record_type"]),
+            intern_str(r["maturity_status"]),
+            intern_str(r["institution_type"]),
+            intern_str(r["institution_main"]),
+            intern_str(r["branch_name"]),
+            r["product_name"] or "",
+            intern_str(r["product_type"]),
+            intern_str(r["product_type_raw"]),
+            r["amount_wan"],
+            "" if (r["currency"] in (None, "", "人民币")) else r["currency"],
+            r["yield_rate_raw"] or "",
+            r["yield_min"],
+            r["yield_max"],
+            r["actual_income_wan"],
+            r["start_date"] or "",
+            end_d,
+            end_iso_enc,
+            r["term_raw"] or "",
+            intern_str(r["fund_source"]),
+            pdf_val,
+        ])
 
     records_payload = {
+        "v": 2,
         "generated_at": bj_now.strftime("%Y-%m-%d %H:%M"),
         "today": bj_today,
-        "fields": COMPACT_FIELDS,
+        "pdf_prefix": pdf_prefix,
+        "companies": comp_list,
+        "dict": str_list,
         "rows": compact_rows,
     }
     records_path = DIST_DATA_DIR / "records.json"
